@@ -1,0 +1,185 @@
+/* ContextIQ Floating Toolbar Styles */
+.contextiq-toolbar {
+  position: absolute;
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 6px;
+  display: flex;
+  gap: 6px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  z-index: 999999;
+  animation: contextiq-fadeIn 0.2s ease-in-out;
+  pointer-events: auto;
+  max-width: calc(100vw - 24px);
+  overflow-x: auto;
+}
+
+@keyframes contextiq-fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.contextiq-toolbar-button {
+  background: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #111827;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  pointer-events: auto;
+}
+
+.contextiq-toolbar-button:hover {
+  background: #eef2ff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.contextiq-more-wrap {
+  position: relative;
+}
+
+.contextiq-more-button {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.contextiq-more-menu {
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  display: none;
+  gap: 6px;
+  grid-template-columns: 1fr;
+  min-width: 172px;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+}
+
+.contextiq-open .contextiq-more-menu {
+  display: grid;
+}
+
+.contextiq-more-menu .contextiq-toolbar-button {
+  justify-content: flex-start;
+  text-align: left;
+  width: 100%;
+}
+
+.contextiq-toolbar-button:active {
+  transform: translateY(0);
+}
+
+/* Loading indicator */
+.contextiq-loading {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: white;
+  padding: 12px 20px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  animation: contextiq-slideIn 0.3s ease-out;
+}
+
+@keyframes contextiq-slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.contextiq-loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: contextiq-spin 0.8s linear infinite;
+}
+
+@keyframes contextiq-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.contextiq-loading-text {
+  color: #4a5568;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.contextiq-language-picker {
+  align-items: center;
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  display: flex;
+  gap: 6px;
+  max-width: calc(100vw - 24px);
+  padding: 6px;
+  position: absolute;
+  z-index: 999999;
+}
+
+.contextiq-language-select {
+  background: #ffffff;
+  border: 0;
+  border-radius: 6px;
+  color: #111827;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+  min-height: 32px;
+  min-width: 128px;
+  padding: 6px 8px;
+}
+
+.contextiq-language-action,
+.contextiq-language-cancel {
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+  min-height: 32px;
+  padding: 7px 10px;
+}
+
+.contextiq-language-action {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.contextiq-language-cancel {
+  background: #ffffff;
+  color: #111827;
+}

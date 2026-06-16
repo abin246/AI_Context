@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "ContextIQ",
+  "version": "1.0.0",
+  "description": "AI-powered browser assistant that works on any website",
+  "permissions": [
+    "contextMenus",
+    "activeTab",
+    "sidePanel",
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://api.groq.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "action": {
+    "default_title": "ContextIQ"
+  }
+}

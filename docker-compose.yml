@@ -1,0 +1,21 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai-context-backend
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  extension-build:
+    build:
+      context: ./extension
+      dockerfile: Dockerfile
+    container_name: ai-context-extension-build
+    profiles:
+      - build-extension
