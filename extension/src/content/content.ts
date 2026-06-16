@@ -276,28 +276,105 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
+const NOISE_SELECTORS = [
+  'script',
+  'style',
+  'noscript',
+  'svg',
+  'canvas',
+  'iframe',
+  'nav',
+  'footer',
+  'header',
+  'form',
+  'button',
+  'input',
+  'textarea',
+  'select',
+  'aside',
+  '[aria-hidden="true"]',
+  '[role="banner"]',
+  '[role="navigation"]',
+  '[role="complementary"]',
+  '[role="contentinfo"]',
+  '[role="dialog"]',
+  '[role="alert"]',
+  '[class*="ad"]',
+  '[id*="ad"]',
+  '[class*="ads"]',
+  '[id*="ads"]',
+  '[class*="advert"]',
+  '[id*="advert"]',
+  '[class*="sponsor"]',
+  '[id*="sponsor"]',
+  '[class*="promo"]',
+  '[id*="promo"]',
+  '[class*="banner"]',
+  '[id*="banner"]',
+  '[class*="cookie"]',
+  '[id*="cookie"]',
+  '[class*="consent"]',
+  '[id*="consent"]',
+  '[class*="newsletter"]',
+  '[id*="newsletter"]',
+  '[class*="subscribe"]',
+  '[id*="subscribe"]',
+  '[class*="popup"]',
+  '[id*="popup"]',
+  '[class*="modal"]',
+  '[id*="modal"]',
+  '[class*="share"]',
+  '[id*="share"]',
+  '[class*="social"]',
+  '[id*="social"]',
+  '[class*="related"]',
+  '[id*="related"]',
+  '[class*="recommend"]',
+  '[id*="recommend"]',
+  '[class*="comment"]',
+  '[id*="comment"]',
+];
+
+const NOISE_LINE_PATTERNS = [
+  /\badvertisement\b/i,
+  /\bsponsored\b/i,
+  /\bpromoted\b/i,
+  /\baffiliate\b/i,
+  /\bsubscribe\b/i,
+  /\bnewsletter\b/i,
+  /\bcookie\b/i,
+  /\baccept cookies\b/i,
+  /\bprivacy policy\b/i,
+  /\bterms of use\b/i,
+  /\bsign up\b/i,
+  /\blog in\b/i,
+  /\bfollow us\b/i,
+  /\bshare this\b/i,
+  /\brelated articles\b/i,
+  /\byou may also like\b/i,
+  /\brecommended for you\b/i,
+  /\bmore from\b/i,
+  /\bbuy now\b/i,
+  /\bshop now\b/i,
+  /\blimited offer\b/i,
+];
+
 function extractPageContent() {
   const title = document.title || '';
   const url = window.location.href;
-  const root =
-    document.querySelector('article') ||
-    document.querySelector('main') ||
-    document.querySelector('[role="main"]') ||
-    document.body;
+  const root = findBestContentRoot();
 
   if (!root) {
-    return { text: '', title, url, updatedAt: Date.now() };
+    return { text: '', title, url, updatedAt: Date.now(), source: 'page' };
   }
 
   const clone = root.cloneNode(true) as HTMLElement;
-  clone
-    .querySelectorAll(
-      'script, style, noscript, svg, canvas, iframe, nav, footer, header, form, button, input, textarea, select, aside, [aria-hidden="true"]'
-    )
-    .forEach((node) => node.remove());
+  removeNoiseElements(clone);
+
+  const text = normalizeReadableText(clone.innerText || clone.textContent || '').slice(0, 28000);
 
   return {
-    text: normalizeReadableText(clone.innerText || clone.textContent || '').slice(0, 24000),
+    text,
     title,
     url,
     updatedAt: Date.now(),
@@ -305,7 +382,60 @@ function extractPageContent() {
   };
 }
 
+function findBestContentRoot(): HTMLElement | null {
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      'article, main, [role="main"], .article, .post, .entry-content, .post-content, .article-content, .content'
+    )
+  );
+
+  if (candidates.length === 0) {
+    return document.body;
+  }
+
+  return candidates
+    .map((element) => ({
+      element,
+      score: scoreContentElement(element),
+    }))
+    .sort((a, b) => b.score - a.score)[0]?.element ?? document.body;
+}
+
+function scoreContentElement(element: HTMLElement) {
+  const text = normalizeReadableText(element.innerText || element.textContent || '');
+  const paragraphs = element.querySelectorAll('p').length;
+  const headings = element.querySelectorAll('h1, h2, h3').length;
+  const links = element.querySelectorAll('a').length;
+
+  return text.length + paragraphs * 300 + headings * 120 - links * 80;
+}
+
+function removeNoiseElements(root: HTMLElement) {
+  root.querySelectorAll(NOISE_SELECTORS.join(',')).forEach((node) => node.remove());
+
+  root.querySelectorAll<HTMLElement>('*').forEach((element) => {
+    const label = [
+      element.className,
+      element.id,
+      element.getAttribute('aria-label'),
+      element.getAttribute('data-testid'),
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    if (
+      /advert|sponsor|promo|cookie|consent|newsletter|subscribe|popup|modal|related|recommend|share|social|comment/.test(
+        label
+      )
+    ) {
+      element.remove();
+    }
+  });
+}
+
 function normalizeReadableText(text: string) {
+  const seen = new Set<string>();
+
   return text
     .replace(/\u00a0/g, ' ')
     .replace(/[ \t]+/g, ' ')
@@ -313,5 +443,12 @@ function normalizeReadableText(text: string) {
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 1)
+    .filter((line) => !NOISE_LINE_PATTERNS.some((pattern) => pattern.test(line)))
+    .filter((line) => {
+      const key = line.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .join('\n');
 }

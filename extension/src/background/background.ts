@@ -1,5 +1,7 @@
 import {
   AI_STATE_KEY,
+  DEFAULT_SETTINGS,
+  HISTORY_KEY,
   RATE_LIMIT_KEY,
   SELECTED_TEXT_KEY,
   SETTINGS_KEY,
@@ -106,10 +108,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'RESET_EXTENSION') {
-    void chrome.storage.local.clear().then(async () => {
-      await ensureDefaultSettings();
-      sendResponse({ ok: true });
-    });
+    void resetExtensionState()
+      .then((settings) => {
+        sendResponse({ ok: true, settings });
+      })
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Could not reset ContextIQ.',
+        });
+      });
+
     return true;
   }
 
@@ -135,6 +144,28 @@ chrome.action.onClicked.addListener((tab) => {
 async function ensureDefaultSettings() {
   const settings = await getSettings();
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+}
+
+async function resetExtensionState() {
+  await chrome.storage.local.remove([
+    SETTINGS_KEY,
+    HISTORY_KEY,
+    AI_STATE_KEY,
+    RATE_LIMIT_KEY,
+    SELECTED_TEXT_KEY,
+  ]);
+
+  const freshSettings = {
+    ...DEFAULT_SETTINGS,
+    prompts: [...DEFAULT_SETTINGS.prompts],
+  };
+
+  await chrome.storage.local.set({
+    [SETTINGS_KEY]: freshSettings,
+    [HISTORY_KEY]: [],
+  });
+
+  return freshSettings;
 }
 
 function createContextMenus() {
@@ -193,8 +224,8 @@ async function processAiRequest(message: ProcessAiMessage, tabId: number) {
             targetLanguage: message.targetLanguage,
             customPrompt: message.customPrompt,
           }),
-          temperature: 0.3,
-          max_tokens: 1200,
+          temperature: 0.1,
+          max_tokens: 900,
         }),
       },
       45000
@@ -435,34 +466,160 @@ function isReadableTabUrl(url?: string) {
 }
 
 function extractReadablePageContent() {
+  const noiseSelectors = [
+    'script',
+    'style',
+    'noscript',
+    'svg',
+    'canvas',
+    'iframe',
+    'nav',
+    'footer',
+    'header',
+    'form',
+    'button',
+    'input',
+    'textarea',
+    'select',
+    'aside',
+    '[aria-hidden="true"]',
+    '[role="banner"]',
+    '[role="navigation"]',
+    '[role="complementary"]',
+    '[role="contentinfo"]',
+    '[role="dialog"]',
+    '[role="alert"]',
+    '[class*="ad"]',
+    '[id*="ad"]',
+    '[class*="ads"]',
+    '[id*="ads"]',
+    '[class*="advert"]',
+    '[id*="advert"]',
+    '[class*="sponsor"]',
+    '[id*="sponsor"]',
+    '[class*="promo"]',
+    '[id*="promo"]',
+    '[class*="banner"]',
+    '[id*="banner"]',
+    '[class*="cookie"]',
+    '[id*="cookie"]',
+    '[class*="consent"]',
+    '[id*="consent"]',
+    '[class*="newsletter"]',
+    '[id*="newsletter"]',
+    '[class*="subscribe"]',
+    '[id*="subscribe"]',
+    '[class*="popup"]',
+    '[id*="popup"]',
+    '[class*="modal"]',
+    '[id*="modal"]',
+    '[class*="share"]',
+    '[id*="share"]',
+    '[class*="social"]',
+    '[id*="social"]',
+    '[class*="related"]',
+    '[id*="related"]',
+    '[class*="recommend"]',
+    '[id*="recommend"]',
+    '[class*="comment"]',
+    '[id*="comment"]',
+  ];
+
+  const noiseLinePatterns = [
+    /\badvertisement\b/i,
+    /\bsponsored\b/i,
+    /\bpromoted\b/i,
+    /\baffiliate\b/i,
+    /\bsubscribe\b/i,
+    /\bnewsletter\b/i,
+    /\bcookie\b/i,
+    /\baccept cookies\b/i,
+    /\bprivacy policy\b/i,
+    /\bterms of use\b/i,
+    /\bsign up\b/i,
+    /\blog in\b/i,
+    /\bfollow us\b/i,
+    /\bshare this\b/i,
+    /\brelated articles\b/i,
+    /\byou may also like\b/i,
+    /\brecommended for you\b/i,
+    /\bmore from\b/i,
+    /\bbuy now\b/i,
+    /\bshop now\b/i,
+    /\blimited offer\b/i,
+  ];
+
   const title = document.title || '';
   const url = window.location.href;
+
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      'article, main, [role="main"], .article, .post, .entry-content, .post-content, .article-content, .content'
+    )
+  );
+
+  const normalize = (value: string) => {
+    const seen = new Set<string>();
+
+    return value
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 1)
+      .filter((line) => !noiseLinePatterns.some((pattern) => pattern.test(line)))
+      .filter((line) => {
+        const key = line.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .join('\n');
+  };
+
+  const scoreContentElement = (element: HTMLElement) => {
+    const text = normalize(element.innerText || element.textContent || '');
+    const paragraphs = element.querySelectorAll('p').length;
+    const headings = element.querySelectorAll('h1, h2, h3').length;
+    const links = element.querySelectorAll('a').length;
+
+    return text.length + paragraphs * 300 + headings * 120 - links * 80;
+  };
+
   const root =
-    document.querySelector('article') ||
-    document.querySelector('main') ||
-    document.querySelector('[role="main"]') ||
-    document.body;
+    candidates
+      .map((element) => ({ element, score: scoreContentElement(element) }))
+      .sort((a, b) => b.score - a.score)[0]?.element || document.body;
 
   if (!root) {
     return { text: '', title, url, updatedAt: Date.now(), source: 'page' };
   }
 
   const clone = root.cloneNode(true) as HTMLElement;
-  clone
-    .querySelectorAll(
-      'script, style, noscript, svg, canvas, iframe, nav, footer, header, form, button, input, textarea, select, aside, [aria-hidden="true"]'
-    )
-    .forEach((node) => node.remove());
 
-  const text = (clone.innerText || clone.textContent || '')
-    .replace(/\u00a0/g, ' ')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 1)
-    .join('\n')
-    .slice(0, 24000);
+  clone.querySelectorAll(noiseSelectors.join(',')).forEach((node) => node.remove());
+
+  clone.querySelectorAll<HTMLElement>('*').forEach((element) => {
+    const label = [
+      element.className,
+      element.id,
+      element.getAttribute('aria-label'),
+      element.getAttribute('data-testid'),
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    if (
+      /advert|sponsor|promo|cookie|consent|newsletter|subscribe|popup|modal|related|recommend|share|social|comment/.test(
+        label
+      )
+    ) {
+      element.remove();
+    }
+  });
+
+  const text = normalize(clone.innerText || clone.textContent || '').slice(0, 28000);
 
   return {
     text,

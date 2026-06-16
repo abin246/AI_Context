@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
   AlertCircle,
@@ -12,7 +12,6 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
-  Send,
   Settings,
   Trash2,
 } from 'lucide-react';
@@ -23,7 +22,6 @@ import {
   HISTORY_KEY,
   SELECTED_TEXT_KEY,
   SETTINGS_KEY,
-  TRANSLATE_LANGUAGES,
 } from '../shared/constants';
 import { ACTION_LABELS } from '../shared/prompts';
 import { clearHistory } from '../shared/storage';
@@ -44,16 +42,7 @@ interface SelectionSnapshot {
   source?: 'selection' | 'page';
 }
 
-const quickActions: ActionId[] = [
-  'summarize',
-  'rewrite',
-  'translate',
-  'explain',
-  'simplify',
-  'improve',
-  'grammar',
-  'expand',
-];
+
 
 function installChromePreviewMock() {
   if (typeof chrome !== 'undefined') return;
@@ -147,12 +136,31 @@ function installChromePreviewMock() {
           return { ok: true };
         }
 
-        if (message.type === 'VALIDATE_API_KEY') return { ok: true };
+        if (message.type === 'VALIDATE_API_KEY') {
+          const apiKey = String(message.apiKey ?? '').trim();
+
+          return apiKey
+            ? { ok: true }
+            : { ok: false, error: 'Enter a Groq API key first.' };
+        }
+
         if (message.type === 'REPLACE_SELECTION') return { ok: true };
         if (message.type === 'RETRY_AI_REQUEST') return { ok: true };
+
         if (message.type === 'RESET_EXTENSION') {
-          memory[HISTORY_KEY] = [];
-          return { ok: true };
+          const freshSettings = {
+            ...DEFAULT_SETTINGS,
+            prompts: [...DEFAULT_SETTINGS.prompts],
+          };
+
+          await mockChrome.storage.local.set({
+            [SETTINGS_KEY]: freshSettings,
+            [HISTORY_KEY]: [],
+            [SELECTED_TEXT_KEY]: { text: '', updatedAt: 0 },
+            [AI_STATE_KEY]: undefined,
+          });
+
+          return { ok: true, settings: freshSettings };
         }
 
         return { ok: true };
@@ -213,18 +221,18 @@ function App() {
   const loadHistory = useContextIqStore((state) => state.loadHistory);
   const loadSettings = useContextIqStore((state) => state.loadSettings);
   const persistSettings = useContextIqStore((state) => state.persistSettings);
+  const setStoreSettings = useContextIqStore((state) => state.setSettings);
 
   const [view, setView] = useState<PanelView>('workbench');
   const [loading, setLoading] = useState<AiState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selection, setSelection] = useState<SelectionSnapshot>({ text: '', updatedAt: 0 });
-  const [composer, setComposer] = useState('');
-  const [customPrompt, setCustomPrompt] = useState('');
-  const [targetLanguage, setTargetLanguage] = useState<string>(TRANSLATE_LANGUAGES[0]);
   const [settings, setSettings] = useState<ExtensionSettings | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState('');
+  const [validatingKey, setValidatingKey] = useState(false);
+  const [resettingExtension, setResettingExtension] = useState(false);
 
   useEffect(() => {
     void loadHistory();
@@ -246,9 +254,28 @@ function App() {
       if (changes[HISTORY_KEY]) {
         setHistory((changes[HISTORY_KEY].newValue as HistoryItem[] | undefined) ?? []);
       }
-      if (changes[AI_STATE_KEY]) {
-        applyAiState(changes[AI_STATE_KEY].newValue as AiState | undefined);
+      if (changes[SETTINGS_KEY]) {
+  const nextSettings =
+    (changes[SETTINGS_KEY].newValue as ExtensionSettings | undefined) ?? {
+      ...DEFAULT_SETTINGS,
+      prompts: [...DEFAULT_SETTINGS.prompts],
+    };
+
+  setSettings(nextSettings);
+  setStoreSettings(nextSettings);
+}
+
+if (changes[AI_STATE_KEY]) {
+  const nextAiState = changes[AI_STATE_KEY].newValue as AiState | undefined;
+
+  if (nextAiState) {
+    applyAiState(nextAiState);
+        } else {
+          setLoading(null);
+          setError(null);
+        }
       }
+
       if (changes[SELECTED_TEXT_KEY]) {
         setSelection(
           (changes[SELECTED_TEXT_KEY].newValue as SelectionSnapshot | undefined) ?? {
@@ -261,17 +288,14 @@ function App() {
 
     chrome.storage.onChanged.addListener(onStorage);
     return () => chrome.storage.onChanged.removeListener(onStorage);
-  }, [loadHistory, loadSettings, setHistory]);
+  },  [loadHistory, loadSettings, setHistory, setStoreSettings]);
 
   const latest = history[0];
-  const activeText = selection.text || '';
   const hasApiKey = Boolean(settings?.apiKey.trim());
   const loadingTitle = loading?.type === 'AI_LOADING' ? loading.title : '';
-  const selectionAge = useMemo(() => {
-    if (!selection.updatedAt) return 'No live selection';
-    if (selection.source === 'page') return 'Using page content';
-    return new Date(selection.updatedAt).toLocaleTimeString();
-  }, [selection.source, selection.updatedAt]);
+  const currentPageTitle = selection.title || 'Current website';
+  const currentPageUrl = selection.url || 'Readable content from the active tab';
+  const isAiRunning = loading?.type === 'AI_LOADING';
 
   function applyAiState(state?: AiState) {
     if (!state) return;
@@ -291,28 +315,40 @@ function App() {
   }
 
   async function refreshSelection() {
-    const response = await chrome.runtime.sendMessage({ type: 'GET_ACTIVE_SELECTION' });
-    setSelection(response?.text ? { ...response, source: 'selection' } : { text: '', updatedAt: 0 });
+    const page = await chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' });
+
+    if (page?.ok && page.text) {
+      setSelection({
+        text: page.text,
+        title: page.title || 'Current website',
+        url: page.url,
+        updatedAt: page.updatedAt ?? Date.now(),
+        source: 'page',
+      });
+      setError(null);
+      return;
+    }
+
+    setSelection({ text: '', updatedAt: 0 });
+    setError(page?.error || 'Could not read this website.');
   }
 
   async function getTextForAction() {
-    const selectedText = activeText.trim();
-    if (selectedText) return selectedText;
-
     const page = await chrome.runtime.sendMessage({ type: 'GET_PAGE_CONTENT' });
+
     if (page?.ok && page.text) {
-      const snapshot = {
+      setSelection({
         text: page.text,
-        title: page.title || 'Current page',
+        title: page.title || 'Current website',
         url: page.url,
         updatedAt: page.updatedAt ?? Date.now(),
-        source: 'page' as const,
-      };
-      setSelection(snapshot);
+        source: 'page',
+      });
+
       return page.text as string;
     }
 
-    throw new Error(page?.error || 'No selected text or readable webpage content found.');
+    throw new Error(page?.error || 'No readable website content found on this tab.');
   }
 
   async function runAction(
@@ -343,27 +379,8 @@ function App() {
     }
   }
 
-  async function sendComposer() {
-    const prompt = composer.trim();
-    if (!prompt) return;
-    await runAction('ask', { question: prompt });
-    setComposer('');
-  }
-
-  async function sendCustomPrompt() {
-    const prompt = customPrompt.trim();
-    if (!prompt) return;
-    await runAction('custom', { customPrompt: prompt });
-    setCustomPrompt('');
-  }
-
-  async function runQuickAction(action: ActionId) {
-    if (action !== 'translate') {
-      await runAction(action);
-      return;
-    }
-
-    await runAction('translate', { targetLanguage });
+  async function summarizeCurrentWebsite() {
+    await runAction('summarize');
   }
 
   async function copyText(text: string, id: string) {
@@ -393,13 +410,86 @@ function App() {
   }
 
   async function validateKey() {
-    if (!settings) return;
-    setSettingsStatus('Validating...');
+  if (!settings) return;
+
+  const apiKey = settings.apiKey.trim();
+
+  if (!apiKey) {
+    setSettingsStatus('Enter a Groq API key first.');
+    return;
+  }
+
+  setValidatingKey(true);
+  setSettingsStatus('Validating Groq key...');
+
+  try {
     const response = await chrome.runtime.sendMessage({
       type: 'VALIDATE_API_KEY',
-      apiKey: settings.apiKey,
+      apiKey,
     });
-    setSettingsStatus(response?.ok ? 'Groq key validated.' : response?.error ?? 'Validation failed.');
+
+    if (response?.ok) {
+      setSettingsStatus('Groq key validated.');
+    } else {
+      setSettingsStatus(response?.error || 'Validation failed.');
+    }
+    } catch (error) {
+      setSettingsStatus(
+        error instanceof Error
+          ? error.message
+          : 'Could not contact the extension background service.'
+      );
+    } finally {
+      setValidatingKey(false);
+    }
+  } 
+
+  async function resetExtension() {
+    const shouldReset = window.confirm(
+      'Reset ContextIQ? This will clear your API key, settings, selected text, and response history.'
+    );
+
+    if (!shouldReset) return;
+
+    setResettingExtension(true);
+    setSettingsStatus('Resetting extension...');
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'RESET_EXTENSION',
+      });
+
+      if (response?.ok === false) {
+        throw new Error(response.error || 'Reset failed.');
+      }
+
+      const freshSettings =
+        (response?.settings as ExtensionSettings | undefined) ?? {
+          ...DEFAULT_SETTINGS,
+          prompts: [...DEFAULT_SETTINGS.prompts],
+        };
+
+      setSettings(freshSettings);
+      setStoreSettings(freshSettings);
+      setHistory([]);
+      setSelection({ text: '', updatedAt: 0 });
+      setLoading(null);
+      setError(null);
+      setShowKey(false);
+      setCopiedId(null);
+
+      setSettingsStatus('Extension reset successfully.');
+
+      window.setTimeout(() => {
+        setSettingsStatus('');
+      }, 1800);
+    } catch (error) {
+      setSettingsStatus(
+        error instanceof Error ? error.message : 'Could not reset extension.'
+      );
+    } finally {
+      setResettingExtension(false);
+    }
   }
 
   function updateSettings<K extends keyof ExtensionSettings>(key: K, value: ExtensionSettings[K]) {
@@ -457,86 +547,46 @@ function App() {
         )}
 
         {view === 'workbench' && (
-          <section className="ci-grid">
-            <div className="selection-panel">
-              <div className="section-head">
+          <section className="summary-workspace">
+            <section className="summary-card">
+              <div className="summary-header">
                 <div>
-                  <h2>{selection.source === 'page' ? 'Page Context' : 'Selected Context'}</h2>
-                  <p>{selection.title || selectionAge}</p>
+                  <span className="summary-kicker">Website summary</span>    
                 </div>
-                <button className="soft-button compact" onClick={refreshSelection}>
-                  <RefreshCw size={15} />
-                  <span>Refresh</span>
-                </button>
               </div>
-              <div className={activeText ? 'selection-text' : 'selection-text empty'}>
-                {activeText || 'Select text on any webpage to start.'}
-              </div>
-            </div>
 
-            <div className="actions-panel">
-              <div className="section-head">
-                <div>
-                  <h2>Actions</h2>
-                  <p>Uses selected text, or the webpage content if nothing is selected</p>
-                </div>
+              <div className="page-source">
+                <span>Current page</span>
+                <strong>{currentPageTitle}</strong>
+                <p>{currentPageUrl}</p>
               </div>
-              <label className="translate-language-field" htmlFor="translate-language">
-                Translate language
-                <select
-                  id="translate-language"
-                  value={targetLanguage}
-                  onChange={(event) => setTargetLanguage(event.target.value)}
+
+              {!hasApiKey && (
+                <div className="summary-warning">
+                  <AlertCircle size={16} />
+                  <span>Add your Groq API key in Settings before summarizing.</span>
+                </div>
+              )}
+
+              <div className="summary-actions">
+                <button
+                  className="summary-primary-button"
+                  onClick={() => void summarizeCurrentWebsite()}
+                  disabled={!hasApiKey || isAiRunning}
                 >
-                  {TRANSLATE_LANGUAGES.map((language) => (
-                    <option key={language} value={language}>
-                      {language}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="action-grid">
-                {quickActions.map((action) => (
-                  <button key={action} onClick={() => runQuickAction(action)}>
-                    <span>{ACTION_LABELS[action]}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+                  {isAiRunning ? 'Summarizing...' : 'Summarize Current Website'}
+                </button>
 
-            <div className="composer-panel">
-              <div className="composer-block">
-                <label htmlFor="ask">Ask about selection</label>
-                <div className="composer-row">
-                  <input
-                    id="ask"
-                    value={composer}
-                    placeholder="Ask a precise follow-up..."
-                    onChange={(event) => setComposer(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') void sendComposer();
-                    }}
-                  />
-                  <button className="send-button" title="Send" onClick={sendComposer}>
-                    <Send size={16} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="composer-block">
-                <label htmlFor="custom">Custom prompt</label>
-                <textarea
-                  id="custom"
-                  rows={3}
-                  value={customPrompt}
-                  placeholder="Example: Convert this into a client-ready email with action items."
-                  onChange={(event) => setCustomPrompt(event.target.value)}
-                />
-                <button className="primary-wide" onClick={sendCustomPrompt}>
-                  Run Custom Prompt
+                <button
+                  className="soft-button compact"
+                  onClick={() => void refreshSelection()}
+                  disabled={isAiRunning}
+                >
+                  <RefreshCw size={15} />
+                  <span>Refresh Page</span>
                 </button>
               </div>
-            </div>
+            </section>
 
             <LatestResult
               item={latest}
@@ -629,9 +679,20 @@ function App() {
             </div>
 
             <div className="settings-actions">
-              <button className="soft-button" onClick={validateKey}>Validate Key</button>
-              <button className="soft-button danger" onClick={() => chrome.runtime.sendMessage({ type: 'RESET_EXTENSION' })}>
-                Reset Extension
+              <button
+                className="soft-button"
+                onClick={validateKey}
+                disabled={validatingKey || !settings.apiKey.trim()}
+              >
+                {validatingKey ? 'Validating...' : 'Validate Key'}
+              </button>
+
+              <button
+                className="soft-button danger"
+                onClick={resetExtension}
+                disabled={resettingExtension}
+              >
+                {resettingExtension ? 'Resetting...' : 'Reset Extension'}
               </button>
             </div>
           </section>
@@ -714,8 +775,8 @@ function EmptyState() {
   return (
     <div className="empty-state">
       <Clipboard size={32} />
-      <h2>No output yet</h2>
-      <p>Select text on a webpage and run an action.</p>
+      <h2>No summary yet</h2>
+      <p>Open a website and click Summarize Current Website.</p>
     </div>
   );
 }
