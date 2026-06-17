@@ -276,87 +276,56 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-const NOISE_SELECTORS = [
+const BASE_SKIP_SELECTORS = [
   'script',
   'style',
   'noscript',
   'svg',
   'canvas',
   'iframe',
-  'nav',
-  'footer',
-  'header',
-  'form',
-  'button',
-  'input',
-  'textarea',
-  'select',
-  'aside',
-  '[aria-hidden="true"]',
-  '[role="banner"]',
-  '[role="navigation"]',
-  '[role="complementary"]',
-  '[role="contentinfo"]',
-  '[role="dialog"]',
-  '[role="alert"]',
-  '[class*="ad"]',
-  '[id*="ad"]',
-  '[class*="ads"]',
-  '[id*="ads"]',
-  '[class*="advert"]',
-  '[id*="advert"]',
-  '[class*="sponsor"]',
-  '[id*="sponsor"]',
-  '[class*="promo"]',
-  '[id*="promo"]',
-  '[class*="banner"]',
-  '[id*="banner"]',
-  '[class*="cookie"]',
-  '[id*="cookie"]',
-  '[class*="consent"]',
-  '[id*="consent"]',
-  '[class*="newsletter"]',
-  '[id*="newsletter"]',
-  '[class*="subscribe"]',
-  '[id*="subscribe"]',
-  '[class*="popup"]',
-  '[id*="popup"]',
-  '[class*="modal"]',
-  '[id*="modal"]',
-  '[class*="share"]',
-  '[id*="share"]',
-  '[class*="social"]',
-  '[id*="social"]',
-  '[class*="related"]',
-  '[id*="related"]',
-  '[class*="recommend"]',
-  '[id*="recommend"]',
-  '[class*="comment"]',
-  '[id*="comment"]',
+  'template',
 ];
 
-const NOISE_LINE_PATTERNS = [
-  /\badvertisement\b/i,
-  /\bsponsored\b/i,
-  /\bpromoted\b/i,
-  /\baffiliate\b/i,
-  /\bsubscribe\b/i,
-  /\bnewsletter\b/i,
-  /\bcookie\b/i,
-  /\baccept cookies\b/i,
-  /\bprivacy policy\b/i,
-  /\bterms of use\b/i,
-  /\bsign up\b/i,
-  /\blog in\b/i,
-  /\bfollow us\b/i,
-  /\bshare this\b/i,
-  /\brelated articles\b/i,
-  /\byou may also like\b/i,
-  /\brecommended for you\b/i,
-  /\bmore from\b/i,
-  /\bbuy now\b/i,
-  /\bshop now\b/i,
-  /\blimited offer\b/i,
+const DIRECT_AD_SELECTORS = [
+  '[data-ad]',
+  '[data-ads]',
+  '[data-ad-slot]',
+  '[data-ad-client]',
+  '[data-ad-format]',
+  '[data-testid="ad"]',
+  '[data-testid="ads"]',
+  '[data-testid="advertisement"]',
+  '.ad',
+  '.ads',
+  '.advert',
+  '.advertisement',
+  '.advertorial',
+  '.adsbygoogle',
+  '.google-auto-placed',
+  '.sponsored',
+  '.sponsor',
+  '.promoted',
+  '#ad',
+  '#ads',
+  '#advert',
+  '#advertisement',
+  '#sponsored',
+];
+
+const AD_LABEL_PATTERN =
+  /(^|[\s_-])(ad|ads|advert|advertisement|advertorial|sponsor|sponsored|promoted|adslot|adunit|adsbygoogle|doubleclick|google-auto-placed)([\s_-]|$)/i;
+
+const DECORATIVE_SYMBOL_PATTERN = /[•●◆◇■□▲▼▶►▪▫★☆✓✔✕✖→←↑↓]/g;
+
+const AD_LINE_PATTERNS = [
+  /^advertisement$/i,
+  /^advertisements$/i,
+  /^sponsored$/i,
+  /^sponsored content$/i,
+  /^promoted$/i,
+  /^paid promotion$/i,
+  /^ad choices$/i,
+  /^ads by google$/i,
 ];
 
 function extractPageContent() {
@@ -368,13 +337,14 @@ function extractPageContent() {
     return { text: '', title, url, updatedAt: Date.now(), source: 'page' };
   }
 
-  const clone = root.cloneNode(true) as HTMLElement;
-  removeNoiseElements(clone);
-
-  const text = normalizeReadableText(clone.innerText || clone.textContent || '').slice(0, 28000);
+  const extractedText = collectVisibleReadableText(root);
+  const text =
+    extractedText.length < 80 && document.body
+      ? collectVisibleReadableText(document.body)
+      : extractedText;
 
   return {
-    text,
+    text: text.slice(0, 28000),
     title,
     url,
     updatedAt: Date.now(),
@@ -383,6 +353,9 @@ function extractPageContent() {
 }
 
 function findBestContentRoot(): HTMLElement | null {
+  const body = document.body;
+  if (!body) return null;
+
   const candidates = Array.from(
     document.querySelectorAll<HTMLElement>(
       'article, main, [role="main"], .article, .post, .entry-content, .post-content, .article-content, .content'
@@ -390,47 +363,116 @@ function findBestContentRoot(): HTMLElement | null {
   );
 
   if (candidates.length === 0) {
-    return document.body;
+    return body;
   }
 
-  return candidates
+  const best = candidates
     .map((element) => ({
       element,
       score: scoreContentElement(element),
     }))
-    .sort((a, b) => b.score - a.score)[0]?.element ?? document.body;
+    .sort((a, b) => b.score - a.score)[0];
+
+  if (!best) return body;
+
+  const bestTextLength = getTextLength(best.element);
+  const bodyTextLength = getTextLength(body);
+
+  if (bestTextLength < 300 || bodyTextLength > bestTextLength * 2.5) {
+    return body;
+  }
+
+  return best.element;
 }
 
 function scoreContentElement(element: HTMLElement) {
-  const text = normalizeReadableText(element.innerText || element.textContent || '');
+  const textLength = getTextLength(element);
   const paragraphs = element.querySelectorAll('p').length;
   const headings = element.querySelectorAll('h1, h2, h3').length;
   const links = element.querySelectorAll('a').length;
 
-  return text.length + paragraphs * 300 + headings * 120 - links * 80;
+  return textLength + paragraphs * 300 + headings * 120 - links * 40;
 }
 
-function removeNoiseElements(root: HTMLElement) {
-  root.querySelectorAll(NOISE_SELECTORS.join(',')).forEach((node) => node.remove());
+function getTextLength(element?: HTMLElement | null) {
+  if (!element) return 0;
+  return normalizeReadableText(element.innerText || element.textContent || '').length;
+}
 
-  root.querySelectorAll<HTMLElement>('*').forEach((element) => {
-    const label = [
-      element.className,
-      element.id,
-      element.getAttribute('aria-label'),
-      element.getAttribute('data-testid'),
-    ]
-      .join(' ')
-      .toLowerCase();
+function collectVisibleReadableText(root: HTMLElement) {
+  const lines: string[] = [];
 
-    if (
-      /advert|sponsor|promo|cookie|consent|newsletter|subscribe|popup|modal|related|recommend|share|social|comment/.test(
-        label
-      )
-    ) {
-      element.remove();
-    }
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const rawText = node.nodeValue || '';
+      if (!rawText.trim()) return NodeFilter.FILTER_REJECT;
+
+      const parent = node.parentElement;
+      if (!parent || shouldSkipTextNode(parent)) {
+        return NodeFilter.FILTER_REJECT;
+      }
+
+      return NodeFilter.FILTER_ACCEPT;
+    },
   });
+
+  while (walker.nextNode()) {
+    const line = normalizeLine(walker.currentNode.nodeValue || '');
+
+    if (line.length > 1 && !isAdvertisementLine(line)) {
+      lines.push(line);
+    }
+  }
+
+  return normalizeReadableText(lines.join('\n'));
+}
+
+function shouldSkipTextNode(element: HTMLElement) {
+  if (element.closest(BASE_SKIP_SELECTORS.join(','))) {
+    return true;
+  }
+
+  if (element.closest(DIRECT_AD_SELECTORS.join(','))) {
+    return true;
+  }
+
+  const labelledAncestor = element.closest<HTMLElement>('[id], [class], [aria-label], [data-testid]');
+  if (labelledAncestor && hasAdLabel(labelledAncestor)) {
+    return true;
+  }
+
+  return isHiddenElement(element);
+}
+
+function hasAdLabel(element: HTMLElement) {
+  const label = [
+    element.id,
+    ...Array.from(element.classList),
+    element.getAttribute('aria-label') || '',
+    element.getAttribute('data-testid') || '',
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  return AD_LABEL_PATTERN.test(label);
+}
+
+function isHiddenElement(element: HTMLElement) {
+  if (element.hidden || element.getAttribute('aria-hidden') === 'true') {
+    return true;
+  }
+
+  const style = window.getComputedStyle(element);
+
+  return style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0';
+}
+
+function normalizeLine(line: string) {
+  return line
+    .replace(/\u00a0/g, ' ')
+    .replace(DECORATIVE_SYMBOL_PATTERN, ' ')
+    .replace(/[^\S\r\n]+/g, ' ')
+    .trim();
 }
 
 function normalizeReadableText(text: string) {
@@ -438,17 +480,23 @@ function normalizeReadableText(text: string) {
 
   return text
     .replace(/\u00a0/g, ' ')
-    .replace(/[ \t]+/g, ' ')
+    .replace(DECORATIVE_SYMBOL_PATTERN, ' ')
+    .replace(/[^\S\r\n]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 1)
-    .filter((line) => !NOISE_LINE_PATTERNS.some((pattern) => pattern.test(line)))
+    .filter((line) => !isAdvertisementLine(line))
     .filter((line) => {
       const key = line.toLowerCase();
       if (seen.has(key)) return false;
+
       seen.add(key);
       return true;
     })
     .join('\n');
+}
+
+function isAdvertisementLine(line: string) {
+  return AD_LINE_PATTERNS.some((pattern) => pattern.test(line));
 }

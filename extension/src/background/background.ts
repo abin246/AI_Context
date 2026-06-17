@@ -466,160 +466,168 @@ function isReadableTabUrl(url?: string) {
 }
 
 function extractReadablePageContent() {
-  const noiseSelectors = [
+  const baseSkipSelectors = [
     'script',
     'style',
     'noscript',
     'svg',
     'canvas',
     'iframe',
-    'nav',
-    'footer',
-    'header',
-    'form',
-    'button',
-    'input',
-    'textarea',
-    'select',
-    'aside',
-    '[aria-hidden="true"]',
-    '[role="banner"]',
-    '[role="navigation"]',
-    '[role="complementary"]',
-    '[role="contentinfo"]',
-    '[role="dialog"]',
-    '[role="alert"]',
-    '[class*="ad"]',
-    '[id*="ad"]',
-    '[class*="ads"]',
-    '[id*="ads"]',
-    '[class*="advert"]',
-    '[id*="advert"]',
-    '[class*="sponsor"]',
-    '[id*="sponsor"]',
-    '[class*="promo"]',
-    '[id*="promo"]',
-    '[class*="banner"]',
-    '[id*="banner"]',
-    '[class*="cookie"]',
-    '[id*="cookie"]',
-    '[class*="consent"]',
-    '[id*="consent"]',
-    '[class*="newsletter"]',
-    '[id*="newsletter"]',
-    '[class*="subscribe"]',
-    '[id*="subscribe"]',
-    '[class*="popup"]',
-    '[id*="popup"]',
-    '[class*="modal"]',
-    '[id*="modal"]',
-    '[class*="share"]',
-    '[id*="share"]',
-    '[class*="social"]',
-    '[id*="social"]',
-    '[class*="related"]',
-    '[id*="related"]',
-    '[class*="recommend"]',
-    '[id*="recommend"]',
-    '[class*="comment"]',
-    '[id*="comment"]',
+    'template',
   ];
 
-  const noiseLinePatterns = [
-    /\badvertisement\b/i,
-    /\bsponsored\b/i,
-    /\bpromoted\b/i,
-    /\baffiliate\b/i,
-    /\bsubscribe\b/i,
-    /\bnewsletter\b/i,
-    /\bcookie\b/i,
-    /\baccept cookies\b/i,
-    /\bprivacy policy\b/i,
-    /\bterms of use\b/i,
-    /\bsign up\b/i,
-    /\blog in\b/i,
-    /\bfollow us\b/i,
-    /\bshare this\b/i,
-    /\brelated articles\b/i,
-    /\byou may also like\b/i,
-    /\brecommended for you\b/i,
-    /\bmore from\b/i,
-    /\bbuy now\b/i,
-    /\bshop now\b/i,
-    /\blimited offer\b/i,
+  const directAdSelectors = [
+    '[data-ad]',
+    '[data-ads]',
+    '[data-ad-slot]',
+    '[data-ad-client]',
+    '[data-ad-format]',
+    '[data-testid="ad"]',
+    '[data-testid="ads"]',
+    '[data-testid="advertisement"]',
+    '.ad',
+    '.ads',
+    '.advert',
+    '.advertisement',
+    '.advertorial',
+    '.adsbygoogle',
+    '.google-auto-placed',
+    '.sponsored',
+    '.sponsor',
+    '.promoted',
+    '#ad',
+    '#ads',
+    '#advert',
+    '#advertisement',
+    '#sponsored',
+  ];
+
+  const adLabelPattern =
+    /(^|[\s_-])(ad|ads|advert|advertisement|advertorial|sponsor|sponsored|promoted|adslot|adunit|adsbygoogle|doubleclick|google-auto-placed)([\s_-]|$)/i;
+
+  const decorativeSymbolPattern = /[•●◆◇■□▲▼▶►▪▫★☆✓✔✕✖→←↑↓]/g;
+
+  const adLinePatterns = [
+    /^advertisement$/i,
+    /^advertisements$/i,
+    /^sponsored$/i,
+    /^sponsored content$/i,
+    /^promoted$/i,
+    /^paid promotion$/i,
+    /^ad choices$/i,
+    /^ads by google$/i,
   ];
 
   const title = document.title || '';
   const url = window.location.href;
 
-  const candidates = Array.from(
-    document.querySelectorAll<HTMLElement>(
-      'article, main, [role="main"], .article, .post, .entry-content, .post-content, .article-content, .content'
-    )
-  );
+  const normalizeLine = (line: string) =>
+    line
+      .replace(/\u00a0/g, ' ')
+      .replace(decorativeSymbolPattern, ' ')
+      .replace(/[^\S\r\n]+/g, ' ')
+      .trim();
 
-  const normalize = (value: string) => {
+  const isAdvertisementLine = (line: string) =>
+    adLinePatterns.some((pattern) => pattern.test(line));
+
+  const normalizeReadableText = (text: string) => {
     const seen = new Set<string>();
 
-    return value
+    return text
       .replace(/\u00a0/g, ' ')
-      .replace(/[ \t]+/g, ' ')
+      .replace(decorativeSymbolPattern, ' ')
+      .replace(/[^\S\r\n]+/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.length > 1)
-      .filter((line) => !noiseLinePatterns.some((pattern) => pattern.test(line)))
+      .filter((line) => !isAdvertisementLine(line))
       .filter((line) => {
         const key = line.toLowerCase();
         if (seen.has(key)) return false;
+
         seen.add(key);
         return true;
       })
       .join('\n');
   };
 
-  const scoreContentElement = (element: HTMLElement) => {
-    const text = normalize(element.innerText || element.textContent || '');
-    const paragraphs = element.querySelectorAll('p').length;
-    const headings = element.querySelectorAll('h1, h2, h3').length;
-    const links = element.querySelectorAll('a').length;
-
-    return text.length + paragraphs * 300 + headings * 120 - links * 80;
-  };
-
-  const root =
-    candidates
-      .map((element) => ({ element, score: scoreContentElement(element) }))
-      .sort((a, b) => b.score - a.score)[0]?.element || document.body;
-
-  if (!root) {
-    return { text: '', title, url, updatedAt: Date.now(), source: 'page' };
-  }
-
-  const clone = root.cloneNode(true) as HTMLElement;
-
-  clone.querySelectorAll(noiseSelectors.join(',')).forEach((node) => node.remove());
-
-  clone.querySelectorAll<HTMLElement>('*').forEach((element) => {
+  const hasAdLabel = (element: HTMLElement) => {
     const label = [
-      element.className,
       element.id,
-      element.getAttribute('aria-label'),
-      element.getAttribute('data-testid'),
+      ...Array.from(element.classList),
+      element.getAttribute('aria-label') || '',
+      element.getAttribute('data-testid') || '',
     ]
       .join(' ')
       .toLowerCase();
 
-    if (
-      /advert|sponsor|promo|cookie|consent|newsletter|subscribe|popup|modal|related|recommend|share|social|comment/.test(
-        label
-      )
-    ) {
-      element.remove();
-    }
-  });
+    return adLabelPattern.test(label);
+  };
 
-  const text = normalize(clone.innerText || clone.textContent || '').slice(0, 28000);
+  const isHiddenElement = (element: HTMLElement) => {
+    if (element.hidden || element.getAttribute('aria-hidden') === 'true') {
+      return true;
+    }
+
+    const style = window.getComputedStyle(element);
+
+    return style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0';
+  };
+
+  const shouldSkipTextNode = (element: HTMLElement) => {
+    if (element.closest(baseSkipSelectors.join(','))) {
+      return true;
+    }
+
+    if (element.closest(directAdSelectors.join(','))) {
+      return true;
+    }
+
+    const labelledAncestor = element.closest<HTMLElement>('[id], [class], [aria-label], [data-testid]');
+    if (labelledAncestor && hasAdLabel(labelledAncestor)) {
+      return true;
+    }
+
+    return isHiddenElement(element);
+  };
+
+  const collectVisibleReadableText = (root: HTMLElement) => {
+    const lines: string[] = [];
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const rawText = node.nodeValue || '';
+        if (!rawText.trim()) return NodeFilter.FILTER_REJECT;
+
+        const parent = node.parentElement;
+        if (!parent || shouldSkipTextNode(parent)) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+
+    while (walker.nextNode()) {
+      const line = normalizeLine(walker.currentNode.nodeValue || '');
+
+      if (line.length > 1 && !isAdvertisementLine(line)) {
+        lines.push(line);
+      }
+    }
+
+    return normalizeReadableText(lines.join('\n'));
+  };
+
+  const body = document.body;
+
+  if (!body) {
+    return { text: '', title, url, updatedAt: Date.now(), source: 'page' };
+  }
+
+  const text = collectVisibleReadableText(body).slice(0, 28000);
 
   return {
     text,

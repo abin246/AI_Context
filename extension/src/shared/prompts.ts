@@ -15,17 +15,14 @@ export const ACTION_LABELS: Record<ActionId, string> = {
 
 const SYSTEM_PROMPT = [
   'You are ContextIQ, a precise webpage summarizer.',
-  'Summarize only the main content of the webpage.',
-  'Ignore advertisements, sponsored content, affiliate text, popups, cookie banners, newsletter prompts, login prompts, navigation menus, headers, footers, sidebars, related posts, comments, and repeated boilerplate.',
-  'Do not mention ignored ads or removed content.',
+  'Summarize the provided webpage content clearly and accurately.',
+  'Avoid advertisement content, sponsored content, promotional text, and decorative special symbols.',
   'Do not invent facts.',
-  'Do not add extra explanations.',
-  'Avoid special symbols, markdown headings, emojis, decorative formatting, and promotional language.',
   'Use simple, clean English.',
 ].join(' ');
 
 const ACTION_PROMPTS: Record<ActionId, string> = {
-  summarize: [
+ summarize: [
     'Create a precise webpage summary using this exact format:',
     '',
     'First write one short paragraph of 1-2 sentences explaining the main topic.',
@@ -35,25 +32,14 @@ const ACTION_PROMPTS: Record<ActionId, string> = {
     '',
     'After Key Points, list 5-8 important points.',
     '',
-    'Strict rules:',
+    'Rules:',
+    '- Avoid advertisement content.',
+    '- Avoid sponsored or promotional text.',
+    '- Avoid special symbols and decorative formatting.',
     '- Do not use markdown headings like ## or ###.',
-    '- Do not use bold text.',
-    '- Do not use emojis.',
-    '- Do not use decorative symbols.',
-    '- Do not add sections like Quick Summary, Important Details, or Main Takeaway.',
-    '- Do not include advertisements, sponsored content, cookie text, newsletter text, navigation text, footer text, sidebar text, related article text, or comments.',
-    '- Keep only precise facts from the main webpage content.',
-    '- Prefer names, dates, events, places, numbers, and important facts.',
+    '- Do not add extra sections.',
+    '- Keep only useful facts from the page.',
     '- Keep each key point short and direct.',
-    '- Do not make the summary longer than needed.',
-    '',
-    'Example style:',
-    'Julius Caesar was a Roman general, statesman, and author who played a critical role in the transformation of the Roman Republic into the Roman Empire.',
-    '',
-    'Key Points',
-    'Born into a patrician family, the gens Julia, on 12 or 13 July 100 BC',
-    'Rose to become one of the most powerful politicians in the Roman Republic through military victories',
-    'Formed the First Triumvirate with Crassus and Pompey',
   ].join('\n'),
 
   rewrite: 'Rewrite the following content professionally while preserving meaning.',

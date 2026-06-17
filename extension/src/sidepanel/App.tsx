@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
   AlertCircle,
-  Brain,
   Check,
   Clipboard,
   Copy,
@@ -12,9 +11,8 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
-  Settings,
   Trash2,
-} from 'lucide-react';
+} from 'lucide-react'; 
 import {
   AI_STATE_KEY,
   DEFAULT_SETTINGS,
@@ -497,209 +495,239 @@ if (changes[AI_STATE_KEY]) {
   }
 
   return (
-    <div className="ci-shell">
-      <aside className="ci-rail" aria-label="ContextIQ navigation">
+  <div className="ci-shell">
+    <main className="ci-main">
+      <header className="ci-topbar">
+        <div className="ci-brand">
+          <div className="ci-logo">CI</div>
+          <div>
+            <p className="eyebrow">ContextIQ</p>
+            <h1>
+              {view === 'settings'
+                ? 'Settings'
+                : view === 'history'
+                  ? 'Response History'
+                  : 'Summarize Page'}
+            </h1>
+          </div>
+        </div>
+
+        <div className={hasApiKey ? 'model-chip ready' : 'model-chip'}>
+          {hasApiKey ? settings?.model : 'API key needed'}
+        </div>
+      </header>
+
+      <nav className="ci-tabs" aria-label="ContextIQ navigation">
         <button
+          type="button"
           className={view === 'workbench' ? 'active' : ''}
-          title="Workbench"
           onClick={() => setView('workbench')}
         >
-          <Brain size={19} />
+          Current Page
         </button>
+
         <button
+          type="button"
           className={view === 'history' ? 'active' : ''}
-          title="History"
           onClick={() => setView('history')}
         >
-          <Clipboard size={19} />
+          History
         </button>
+
         <button
+          type="button"
           className={view === 'settings' ? 'active' : ''}
-          title="Settings"
           onClick={() => setView('settings')}
         >
-          <Settings size={19} />
+          Settings
         </button>
-      </aside>
+      </nav>
 
-      <main className="ci-main">
-        <header className="ci-header">
-          <div>            
-            <h1>{view === 'settings' ? 'Settings' : view === 'history' ? 'Response History' : 'ContextIQ'}</h1>
-          </div>
-          <div className={hasApiKey ? 'model-chip ready' : 'model-chip'}>
-            {hasApiKey ? settings?.model : 'API key needed'}
-          </div>
-        </header>
+      {loading?.type === 'AI_LOADING' && (
+        <section className="ci-status loading">
+          <Loader2 size={17} />
+          <span>{loadingTitle} is running</span>
+        </section>
+      )}
 
-        {loading?.type === 'AI_LOADING' && (
-          <section className="ci-status loading">
-            <Loader2 size={17} />
-            <span>{loadingTitle} is running</span>
-          </section>
-        )}
+      {error && (
+        <section className="ci-status error">
+          <AlertCircle size={17} />
+          <span>{error}</span>
+        </section>
+      )}
 
-        {error && (
-          <section className="ci-status error">
-            <AlertCircle size={17} />
-            <span>{error}</span>
-          </section>
-        )}
+      {view === 'workbench' && (
+        <section className="summary-workspace">
+          <section className="current-page-panel">
+            <div className="current-page-info">
+              <span>Current Page</span>
+              <strong>{currentPageTitle}</strong>
+              <p>{currentPageUrl}</p>
+            </div>
 
-        {view === 'workbench' && (
-          <section className="summary-workspace">
-            <section className="summary-card">
-              <div className="summary-header">
-                <div>
-                  <span className="summary-kicker">Website summary</span>    
-                </div>
-              </div>
+            <div className="current-page-actions">
+              <button
+                className="summary-primary-button"
+                onClick={() => void summarizeCurrentWebsite()}
+                disabled={!hasApiKey || isAiRunning}
+              >
+                {isAiRunning ? 'Summarizing...' : 'Summarize Page'}
+              </button>
 
-              <div className="page-source">
-                <span>Current page</span>
-                <strong>{currentPageTitle}</strong>
-                <p>{currentPageUrl}</p>
-              </div>
-
-              {!hasApiKey && (
-                <div className="summary-warning">
-                  <AlertCircle size={16} />
-                  <span>Add your Groq API key in Settings before summarizing.</span>
-                </div>
-              )}
-
-              <div className="summary-actions">
-                <button
-                  className="summary-primary-button"
-                  onClick={() => void summarizeCurrentWebsite()}
-                  disabled={!hasApiKey || isAiRunning}
-                >
-                  {isAiRunning ? 'Summarizing...' : 'Summarize Current Website'}
-                </button>
-
-                <button
-                  className="soft-button compact"
-                  onClick={() => void refreshSelection()}
-                  disabled={isAiRunning}
-                >
-                  <RefreshCw size={15} />
-                  <span>Refresh Page</span>
-                </button>
-              </div>
-            </section>
-
-            <LatestResult
-              item={latest}
-              copiedId={copiedId}
-              onCopy={copyText}
-              onReplace={replaceSelection}
-              onRetry={retry}
-            />
-          </section>
-        )}
-
-        {view === 'history' && (
-          <section className="history-panel">
-            <div className="section-head">
-              <div>
-                <h2>Conversation History</h2>
-                <p>{history.length} saved response{history.length === 1 ? '' : 's'}</p>
-              </div>
-              <button className="soft-button danger" onClick={resetHistory}>
-                <Trash2 size={15} />
-                <span>Clear</span>
+              <button
+                className="soft-button compact"
+                onClick={() => void refreshSelection()}
+                disabled={isAiRunning}
+              >
+                <RefreshCw size={15} />
+                <span>Refresh</span>
               </button>
             </div>
-            <div className="history-list">
-              {history.length === 0 && <EmptyState />}
-              {history.map((item) => (
-                <ResultCard
-                  key={item.id}
-                  item={item}
-                  copiedId={copiedId}
-                  onCopy={copyText}
-                  onReplace={replaceSelection}
-                  onRetry={retry}
-                />
-              ))}
-            </div>
           </section>
-        )}
 
-        {view === 'settings' && settings && (
-          <section className="settings-panel">
-            <div className="section-head">
-              <div>
-                <h2>Local AI Configuration</h2>
-                <p>Stored only in Chrome Storage on this device</p>
-              </div>
-              <button className="primary-button" onClick={savePanelSettings}>
-                <Save size={15} />
-                <span>Save</span>
+          {!hasApiKey && (
+            <div className="summary-warning">
+              <AlertCircle size={16} />
+              <span>Add your Groq API key in Settings before summarizing.</span>
+            </div>
+          )}
+
+          <LatestResult
+            item={latest}
+            copiedId={copiedId}
+            onCopy={copyText}
+            onReplace={replaceSelection}
+            onRetry={retry}
+          />
+        </section>
+      )}
+
+      {view === 'history' && (
+        <section className="history-panel">
+          <div className="section-head">
+            <div>
+              <h2>Conversation History</h2>
+              <p>
+                {history.length} saved response{history.length === 1 ? '' : 's'}
+              </p>
+            </div>
+
+            <button className="soft-button danger" onClick={resetHistory}>
+              <Trash2 size={15} />
+              <span>Clear</span>
+            </button>
+          </div>
+
+          <div className="history-list">
+            {history.length === 0 && <EmptyState />}
+
+            {history.map((item) => (
+              <ResultCard
+                key={item.id}
+                item={item}
+                copiedId={copiedId}
+                onCopy={copyText}
+                onReplace={replaceSelection}
+                onRetry={retry}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {view === 'settings' && settings && (
+        <section className="settings-panel">
+          <div className="section-head">
+            <div>
+              <h2>Local AI Configuration</h2>
+              <p>Stored only in Chrome Storage on this device</p>
+            </div>
+
+            <button className="primary-button" onClick={savePanelSettings}>
+              <Save size={15} />
+              <span>Save</span>
+            </button>
+          </div>
+
+          {settingsStatus && <div className="settings-status">{settingsStatus}</div>}
+
+          <label className="field">
+            API Key
+            <div className="secret-row">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={settings.apiKey}
+                placeholder="gsk_..."
+                onChange={(event) => updateSettings('apiKey', event.target.value)}
+              />
+
+              <button
+                type="button"
+                title="Show or hide API key"
+                onClick={() => setShowKey((value) => !value)}
+              >
+                {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
+          </label>
 
-            {settingsStatus && <div className="settings-status">{settingsStatus}</div>}
-
+          <div className="settings-grid">
             <label className="field">
-              API Key
-              <div className="secret-row">
-                <input
-                  type={showKey ? 'text' : 'password'}
-                  value={settings.apiKey}
-                  placeholder="gsk_..."
-                  onChange={(event) => updateSettings('apiKey', event.target.value)}
-                />
-                <button title="Show or hide API key" onClick={() => setShowKey((value) => !value)}>
-                  {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
+              Provider
+              <select
+                value={settings.provider}
+                onChange={(event) =>
+                  updateSettings('provider', event.target.value as ExtensionSettings['provider'])
+                }
+              >
+                <option value="groq">Groq</option>
+                <option value="openai" disabled>
+                  OpenAI - future
+                </option>
+                <option value="gemini" disabled>
+                  Gemini - future
+                </option>
+              </select>
             </label>
 
-            <div className="settings-grid">
-              <label className="field">
-                Provider
-                <select value={settings.provider} onChange={(event) => updateSettings('provider', event.target.value as ExtensionSettings['provider'])}>
-                  <option value="groq">Groq</option>
-                  <option value="openai" disabled>OpenAI - future</option>
-                  <option value="gemini" disabled>Gemini - future</option>
-                </select>
-              </label>
-
-              <label className="field">
-                Model
-                <select value={settings.model} onChange={(event) => updateSettings('model', event.target.value)}>
-                  {GROQ_MODELS.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="settings-actions">
-              <button
-                className="soft-button"
-                onClick={validateKey}
-                disabled={validatingKey || !settings.apiKey.trim()}
+            <label className="field">
+              Model
+              <select
+                value={settings.model}
+                onChange={(event) => updateSettings('model', event.target.value)}
               >
-                {validatingKey ? 'Validating...' : 'Validate Key'}
-              </button>
+                {GROQ_MODELS.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
-              <button
-                className="soft-button danger"
-                onClick={resetExtension}
-                disabled={resettingExtension}
-              >
-                {resettingExtension ? 'Resetting...' : 'Reset Extension'}
-              </button>
-            </div>
-          </section>
-        )}
-      </main>
-    </div>
-  );
+          <div className="settings-actions">
+            <button
+              className="soft-button"
+              onClick={validateKey}
+              disabled={validatingKey || !settings.apiKey.trim()}
+            >
+              {validatingKey ? 'Validating...' : 'Validate Key'}
+            </button>
+
+            <button
+              className="soft-button danger"
+              onClick={resetExtension}
+              disabled={resettingExtension}
+            >
+              {resettingExtension ? 'Resetting...' : 'Reset Extension'}
+            </button>
+          </div>
+        </section>
+      )}
+    </main>
+  </div>
+);
 }
 
 function LatestResult(props: {
