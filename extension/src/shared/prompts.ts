@@ -2,7 +2,8 @@ import type { ActionId } from './types';
 
 export const ACTION_LABELS: Record<ActionId, string> = {
   summarize: 'Summarize',
-  rewrite: 'Rewrite',
+  rewrite: 'Smart Rewrite',
+  reply: 'Draft Reply',
   translate: 'Translate',
   explain: 'Explain',
   simplify: 'Simplify',
@@ -42,7 +43,21 @@ const ACTION_PROMPTS: Record<ActionId, string> = {
     '- Keep each key point short and direct.',
   ].join('\n'),
 
-  rewrite: 'Rewrite the following content professionally while preserving meaning.',
+  rewrite: [
+    'Rewrite the provided text clearly and professionally.',
+    'Preserve the original meaning.',
+    'Improve tone, grammar, clarity, and flow.',
+    'If the user provided a tone or style detail, follow it.',
+    'Return only the rewritten text.',
+  ].join('\n'),
+
+  reply: [
+    'Draft a context-aware reply based on the provided page, thread, message, or conversation content.',
+    'The reply should be natural, concise, and appropriate for the context.',
+    'Do not invent details.',
+    'If the user provided a reply goal or tone, follow it.',
+    'Return only the reply text.',
+  ].join('\n'),
   translate:
     'Translate the following content while preserving context and intent. If no target language is provided, translate it into English.',
   explain: 'Explain this content clearly with examples.',

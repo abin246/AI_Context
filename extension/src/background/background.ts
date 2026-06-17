@@ -141,6 +141,96 @@ chrome.action.onClicked.addListener((tab) => {
   }
 });
 
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (!tab.id) return;
+
+  if (command === 'open-contextiq') {
+    chrome.sidePanel.open({ tabId: tab.id }).catch(() => undefined);
+    return;
+  }
+
+  if (command === 'summarize-current-page') {
+    void summarizeTabFromCommand(tab.id);
+  }
+});
+
+async function summarizeTabFromCommand(tabId: number) {
+  await chrome.sidePanel.open({ tabId }).catch(() => undefined);
+
+  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+
+  if (!isReadableTabUrl(tab?.url)) {
+    await publishAiState({
+      type: 'AI_ERROR',
+      requestId: `${Date.now()}`,
+      action: 'summarize',
+      title: 'Summarize',
+      error: 'ContextIQ cannot read this browser page. Open a normal website tab and try again.',
+      originalText: '',
+    });
+    return;
+  }
+
+  const content = await getPageContentFromTabId(tabId);
+
+  if (!content.ok || !content.text) {
+    await publishAiState({
+      type: 'AI_ERROR',
+      requestId: `${Date.now()}`,
+      action: 'summarize',
+      title: 'Summarize',
+      error: content.error || 'No readable page text found.',
+      originalText: '',
+    });
+    return;
+  }
+
+  await processAiRequest(
+    {
+      type: 'PROCESS_AI_REQUEST',
+      action: 'summarize',
+      text: content.text,
+    },
+    tabId
+  );
+}
+
+async function getPageContentFromTabId(tabId: number) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTENT' });
+
+    if (response?.text) {
+      return { ok: true, ...response };
+    }
+  } catch {
+    // Content script may not be available on old tabs.
+  }
+
+  try {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: extractReadablePageContent,
+    });
+
+    const content = result?.result;
+
+    if (content?.text) {
+      return { ok: true, ...content };
+    }
+
+    return { ok: false, text: '', error: 'No readable page text found.' };
+  } catch (error) {
+    return {
+      ok: false,
+      text: '',
+      error:
+        error instanceof Error
+          ? `ContextIQ could not read this webpage: ${error.message}`
+          : 'ContextIQ could not read this webpage.',
+    };
+  }
+}
+
 async function ensureDefaultSettings() {
   const settings = await getSettings();
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });

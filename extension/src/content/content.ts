@@ -6,6 +6,7 @@ let toolbar: HTMLElement | null = null;
 let loadingIndicator: HTMLElement | null = null;
 let languagePicker: HTMLElement | null = null;
 let currentSelectedText = '';
+let lastEditableTarget: HTMLElement | HTMLInputElement | HTMLTextAreaElement | null = null;
 
 const primaryActions: ActionId[] = ['summarize', 'rewrite', 'translate', 'explain'];
 const moreActions: ActionId[] = ['simplify', 'expand', 'improve', 'grammar', 'custom', 'ask'];
@@ -13,6 +14,55 @@ const moreActions: ActionId[] = ['simplify', 'expand', 'improve', 'grammar', 'cu
 document.addEventListener('mouseup', handleTextSelection);
 document.addEventListener('selectionchange', handleSelectionChange);
 document.addEventListener('scroll', hideToolbar, true);
+document.addEventListener('focusin', rememberEditableTarget, true);
+
+
+function rememberEditableTarget(event: FocusEvent) {
+  const target = event.target;
+
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  ) {
+    lastEditableTarget = target;
+  }
+}
+
+function isTextInputElement(
+  element: Element | null
+): element is HTMLInputElement | HTMLTextAreaElement {
+  return (
+    element instanceof HTMLTextAreaElement ||
+    (element instanceof HTMLInputElement &&
+      ['text', 'search', 'url', 'email', 'tel', 'password'].includes(element.type))
+  );
+}
+
+function insertIntoTextInput(element: HTMLInputElement | HTMLTextAreaElement, text: string) {
+  const start = element.selectionStart ?? element.value.length;
+  const end = element.selectionEnd ?? start;
+
+  element.setRangeText(text, start, end, 'end');
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.focus();
+}
+
+function insertIntoContentEditable(element: HTMLElement, text: string) {
+  element.focus();
+
+  const selection = window.getSelection();
+
+  if (selection && selection.rangeCount > 0 && element.contains(selection.anchorNode)) {
+    selection.deleteFromDocument();
+    selection.getRangeAt(0).insertNode(document.createTextNode(text));
+    selection.collapseToEnd();
+  } else {
+    element.appendChild(document.createTextNode(text));
+  }
+
+  element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+}
 
 function handleTextSelection(event: MouseEvent) {
   if (isInsideContextIq(event.target)) return;
@@ -154,22 +204,32 @@ function hideLanguagePicker() {
 }
 
 function replaceSelection(text: string) {
-  const active = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
-  if (
-    active &&
-    (active.tagName === 'TEXTAREA' ||
-      (active.tagName === 'INPUT' && ['text', 'search', 'url', 'email', 'tel', 'password'].includes(active.type)))
-  ) {
-    const start = active.selectionStart ?? active.value.length;
-    const end = active.selectionEnd ?? start;
-    active.setRangeText(text, start, end, 'end');
-    active.dispatchEvent(new Event('input', { bubbles: true }));
-    active.focus();
+  const active = document.activeElement;
+
+  if (isTextInputElement(active)) {
+    insertIntoTextInput(active, text);
+    return;
+  }
+
+  if (active instanceof HTMLElement && active.isContentEditable) {
+    insertIntoContentEditable(active, text);
+    return;
+  }
+
+  if (isTextInputElement(lastEditableTarget)) {
+    insertIntoTextInput(lastEditableTarget, text);
+    return;
+  }
+
+  if (lastEditableTarget instanceof HTMLElement && lastEditableTarget.isContentEditable) {
+    insertIntoContentEditable(lastEditableTarget, text);
     return;
   }
 
   const selection = window.getSelection();
+
   if (!selection || selection.rangeCount === 0) return;
+
   selection.deleteFromDocument();
   selection.getRangeAt(0).insertNode(document.createTextNode(text));
 }

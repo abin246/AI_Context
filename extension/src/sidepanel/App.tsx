@@ -22,13 +22,25 @@ import {
   SETTINGS_KEY,
 } from '../shared/constants';
 import { ACTION_LABELS } from '../shared/prompts';
-import { clearHistory } from '../shared/storage';
-import type { ActionId, AiState, ExtensionSettings, HistoryItem } from '../shared/types';
+import {
+  addClipboardItem,
+  clearClipboardItems,
+  clearHistory,
+  deleteClipboardItem,
+  getClipboardItems,
+} from '../shared/storage';
+import type {
+  ActionId,
+  AiState,
+  ClipboardEntry,
+  ExtensionSettings,
+  HistoryItem,
+} from '../shared/types';
 import { useContextIqStore } from '../shared/useContextIqStore';
 import '../styles/tailwind.css';
 import './App.css';
 
-type PanelView = 'workbench' | 'history' | 'settings';
+type PanelView = 'workbench' | 'clipboard' | 'history' | 'settings';
 
 installChromePreviewMock();
 
@@ -232,10 +244,15 @@ function App() {
   const [validatingKey, setValidatingKey] = useState(false);
   const [resettingExtension, setResettingExtension] = useState(false);
 
+  const [clipboardItems, setClipboardItems] = useState<ClipboardEntry[]>([]);
+  const [clipboardInput, setClipboardInput] = useState('');
+  const [clipboardSearch, setClipboardSearch] = useState('');
+
   useEffect(() => {
     void loadHistory();
     void loadSettings().then(setSettings);
     void refreshSelection();
+    void getClipboardItems().then(setClipboardItems);
 
     chrome.storage.local.get([AI_STATE_KEY, SELECTED_TEXT_KEY], (result) => {
       applyAiState(result[AI_STATE_KEY] as AiState | undefined);
@@ -243,6 +260,8 @@ function App() {
         setSelection(result[SELECTED_TEXT_KEY] as SelectionSnapshot);
       }
     });
+
+    
 
     const onStorage = (
       changes: Record<string, chrome.storage.StorageChange>,
@@ -294,6 +313,10 @@ if (changes[AI_STATE_KEY]) {
   const currentPageTitle = selection.title || 'Current website';
   const currentPageUrl = selection.url || 'Readable content from the active tab';
   const isAiRunning = loading?.type === 'AI_LOADING';
+
+  const filteredClipboardItems: ClipboardEntry[] = clipboardItems.filter((item) =>
+    item.text.toLowerCase().includes(clipboardSearch.trim().toLowerCase())
+  );
 
   function applyAiState(state?: AiState) {
     if (!state) return;
@@ -494,6 +517,91 @@ if (changes[AI_STATE_KEY]) {
     setSettings((current) => (current ? { ...current, [key]: value } : current));
   }
 
+  async function rewriteSelectedText() {
+  const response = await chrome.runtime.sendMessage({ type: 'GET_ACTIVE_SELECTION' });
+  const selectedText = response?.text?.trim();
+
+  if (!selectedText) {
+    setError('Select text on the page before using Smart Rewrite.');
+    return;
+  }
+
+  const tone =
+    window.prompt('Rewrite style? Example: formal, shorter, simple, persuasive') || undefined;
+
+  await runAction('rewrite', {
+    question: tone ? `Rewrite style: ${tone}` : undefined,
+  });
+}
+
+async function draftReplyFromPage() {
+  const replyGoal =
+    window.prompt('Reply goal or tone? Example: polite decline, interested, short follow-up') ||
+    undefined;
+
+  await runAction('reply', {
+    question: replyGoal ? `Reply goal: ${replyGoal}` : undefined,
+  });
+}
+
+async function saveClipboardText(text?: string) {
+  const value = (text ?? clipboardInput).trim();
+
+  if (!value) {
+    setError('Clipboard text is empty.');
+    return;
+  }
+
+  const nextItems = await addClipboardItem({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    text: value,
+    title: currentPageTitle,
+    sourceUrl: currentPageUrl,
+    createdAt: Date.now(),
+  });
+
+  setClipboardItems(nextItems);
+  setClipboardInput('');
+  setError(null);
+}
+
+async function readSystemClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+
+    if (!text.trim()) {
+      setError('System clipboard is empty.');
+      return;
+    }
+
+    await saveClipboardText(text);
+  } catch {
+    setError('Clipboard permission was blocked. Paste text manually instead.');
+  }
+}
+
+async function removeClipboardEntry(id: string) {
+  const nextItems = await deleteClipboardItem(id);
+  setClipboardItems(nextItems);
+}
+
+async function clearClipboardManager() {
+  await clearClipboardItems();
+  setClipboardItems([]);
+}
+
+async function summarizeClipboardEntry(item: ClipboardEntry) {
+  const response = await chrome.runtime.sendMessage({
+    type: 'PROCESS_AI_REQUEST',
+    action: 'summarize',
+    text: item.text,
+  });
+
+  if (response?.ok === false) {
+    setError(response.error || 'Could not summarize clipboard item.');
+  }
+}
+
   return (
   <div className="ci-shell">
     <main className="ci-main">
@@ -524,6 +632,14 @@ if (changes[AI_STATE_KEY]) {
           onClick={() => setView('workbench')}
         >
           Current Page
+        </button>
+
+        <button
+          type="button"
+          className={view === 'clipboard' ? 'active' : ''}
+          onClick={() => setView('clipboard')}
+        >
+          Clipboard
         </button>
 
         <button
@@ -577,6 +693,22 @@ if (changes[AI_STATE_KEY]) {
 
               <button
                 className="soft-button compact"
+                onClick={() => void rewriteSelectedText()}
+                disabled={!hasApiKey || isAiRunning}
+              >
+                Smart Rewrite
+              </button>
+
+              <button
+                className="soft-button compact"
+                onClick={() => void draftReplyFromPage()}
+                disabled={!hasApiKey || isAiRunning}
+              >
+                Draft Reply
+              </button>
+
+              <button
+                className="soft-button compact"
                 onClick={() => void refreshSelection()}
                 disabled={isAiRunning}
               >
@@ -600,6 +732,81 @@ if (changes[AI_STATE_KEY]) {
             onReplace={replaceSelection}
             onRetry={retry}
           />
+        </section>
+      )}
+
+      {view === 'clipboard' && (
+        <section className="clipboard-panel">
+          <div className="section-head">
+            <div>
+              <h2>AI Clipboard Manager</h2>
+              <p>{clipboardItems.length} saved clipboard item{clipboardItems.length === 1 ? '' : 's'}</p>
+            </div>
+
+            <button className="soft-button danger" onClick={() => void clearClipboardManager()}>
+              <Trash2 size={15} />
+              <span>Clear</span>
+            </button>
+          </div>
+
+          <div className="clipboard-compose">
+            <textarea
+              rows={4}
+              value={clipboardInput}
+              placeholder="Paste text here or read from system clipboard..."
+              onChange={(event) => setClipboardInput(event.target.value)}
+            />
+
+            <div className="clipboard-actions">
+              <button className="primary-button" onClick={() => void saveClipboardText()}>
+                Save Text
+              </button>
+
+              <button className="soft-button" onClick={() => void readSystemClipboard()}>
+                Read Clipboard
+              </button>
+            </div>
+          </div>
+
+          <input
+            value={clipboardSearch}
+            placeholder="Search clipboard..."
+            onChange={(event) => setClipboardSearch(event.target.value)}
+          />
+
+          <div className="clipboard-list">
+            {filteredClipboardItems.length === 0 && (
+              <div className="empty-state">
+                <Clipboard size={32} />
+                <h2>No clipboard items</h2>
+                <p>Save copied text to reuse, summarize, or transform it later.</p>
+              </div>
+            )}
+
+            {filteredClipboardItems.map((item) => (
+              <article className="clipboard-card" key={item.id}>
+                <time>{new Date(item.createdAt).toLocaleString()}</time>
+                <p>{item.text}</p>
+
+                <div className="card-actions">
+                  <button onClick={() => void copyText(item.text, item.id)}>
+                    {copiedId === item.id ? <Check size={15} /> : <Copy size={15} />}
+                    <span>{copiedId === item.id ? 'Copied' : 'Copy'}</span>
+                  </button>
+
+                  <button onClick={() => void summarizeClipboardEntry(item)}>
+                    <RefreshCw size={15} />
+                    <span>Summarize</span>
+                  </button>
+
+                  <button onClick={() => void removeClipboardEntry(item.id)}>
+                    <Trash2 size={15} />
+                    <span>Delete</span>
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
         </section>
       )}
 

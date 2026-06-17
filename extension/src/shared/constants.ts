@@ -5,6 +5,7 @@ export const HISTORY_KEY = 'contextiqHistory';
 export const AI_STATE_KEY = 'latestAiState';
 export const RATE_LIMIT_KEY = 'contextiqRateLimit';
 export const SELECTED_TEXT_KEY = 'contextiqSelectedText';
+export const CLIPBOARD_KEY = 'contextiqClipboard';
 
 export const GROQ_MODELS = [
   'llama-3.3-70b-versatile',

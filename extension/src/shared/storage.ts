@@ -1,5 +1,6 @@
-import { DEFAULT_SETTINGS, HISTORY_KEY, SETTINGS_KEY } from './constants';
-import type { ExtensionSettings, HistoryItem } from './types';
+import { CLIPBOARD_KEY, DEFAULT_SETTINGS, HISTORY_KEY, SETTINGS_KEY } from './constants';
+import type { ClipboardEntry, ExtensionSettings, HistoryItem } from './types';
+
 
 export async function getSettings(): Promise<ExtensionSettings> {
   const result = await chrome.storage.local.get(SETTINGS_KEY);
@@ -29,4 +30,37 @@ export async function addHistoryItem(item: HistoryItem) {
 
 export async function clearHistory() {
   await chrome.storage.local.set({ [HISTORY_KEY]: [] });
+}
+
+export async function getClipboardItems(): Promise<ClipboardEntry[]> {
+  const result = await chrome.storage.local.get(CLIPBOARD_KEY);
+  return Array.isArray(result[CLIPBOARD_KEY])
+    ? (result[CLIPBOARD_KEY] as ClipboardEntry[])
+    : [];
+}
+
+export async function addClipboardItem(item: ClipboardEntry) {
+  const items = await getClipboardItems();
+
+  const nextItems = [
+    item,
+    ...items.filter((entry) => entry.text.trim() !== item.text.trim()),
+  ].slice(0, 50);
+
+  await chrome.storage.local.set({ [CLIPBOARD_KEY]: nextItems });
+
+  return nextItems;
+}
+
+export async function deleteClipboardItem(id: string) {
+  const items = await getClipboardItems();
+  const nextItems = items.filter((item) => item.id !== id);
+
+  await chrome.storage.local.set({ [CLIPBOARD_KEY]: nextItems });
+
+  return nextItems;
+}
+
+export async function clearClipboardItems() {
+  await chrome.storage.local.set({ [CLIPBOARD_KEY]: [] });
 }

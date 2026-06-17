@@ -4,6 +4,7 @@ export type Theme = 'light' | 'dark' | 'system';
 export type ActionId =
   | 'summarize'
   | 'rewrite'
+  | 'reply'
   | 'translate'
   | 'explain'
   | 'simplify'
@@ -12,6 +13,14 @@ export type ActionId =
   | 'grammar'
   | 'custom'
   | 'ask';
+
+export interface ClipboardEntry {
+  id: string;
+  text: string;
+  title?: string;
+  sourceUrl?: string;
+  createdAt: number;
+}
 
 export interface CustomPrompt {
   id: string;

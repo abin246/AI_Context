@@ -61,7 +61,7 @@ button {
   border-radius: 14px;
   display: grid;
   gap: 6px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   padding: 6px;
 }
 
@@ -714,4 +714,50 @@ textarea:focus {
   .current-page-actions .summary-primary-button {
     flex: 0 0 auto;
   }
+}
+
+.clipboard-panel {
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  box-shadow: 0 18px 46px rgba(2, 6, 23, 0.24);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+}
+
+.clipboard-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.clipboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.clipboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.clipboard-card {
+  background: #020617;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.clipboard-card p {
+  color: #e5edf8;
+  font-size: 13px;
+  line-height: 1.55;
+  margin-top: 8px;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
 }

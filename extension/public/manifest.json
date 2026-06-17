@@ -32,5 +32,21 @@
   },
   "action": {
     "default_title": "ContextIQ"
+  },
+  "commands": {
+    "open-contextiq": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
+      },
+      "description": "Open ContextIQ"
+    },
+    "summarize-current-page": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Summarize current page"
+    }
   }
 }
