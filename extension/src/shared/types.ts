@@ -6,6 +6,7 @@ export type ActionId =
   | 'rewrite'
   | 'reply'
   | 'translate'
+  | 'form_fill'
   | 'explain'
   | 'simplify'
   | 'expand'
@@ -34,6 +35,7 @@ export interface ExtensionSettings {
   model: string;
   theme: Theme;
   prompts: CustomPrompt[];
+  userProfile: string;
 }
 
 export interface HistoryItem {

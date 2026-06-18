@@ -5,6 +5,7 @@ export const ACTION_LABELS: Record<ActionId, string> = {
   rewrite: 'Smart Rewrite',
   reply: 'Draft Reply',
   translate: 'Translate',
+  form_fill: 'Smart Form Fill',
   explain: 'Explain',
   simplify: 'Simplify',
   expand: 'Expand',
@@ -15,15 +16,16 @@ export const ACTION_LABELS: Record<ActionId, string> = {
 };
 
 const SYSTEM_PROMPT = [
-  'You are ContextIQ, a precise webpage summarizer.',
-  'Summarize the provided webpage content clearly and accurately.',
+  'You are ContextIQ, a precise browser assistant.',
+  'Use only the provided content and user instruction.',
   'Avoid advertisement content, sponsored content, promotional text, and decorative special symbols.',
   'Do not invent facts.',
-  'Use simple, clean English.',
+  'Follow the requested format exactly.',
+  'Use simple, clean English unless translation is requested.',
 ].join(' ');
 
 const ACTION_PROMPTS: Record<ActionId, string> = {
- summarize: [
+  summarize: [
     'Create a precise webpage summary using this exact format:',
     '',
     'First write one short paragraph of 1-2 sentences explaining the main topic.',
@@ -60,8 +62,25 @@ const ACTION_PROMPTS: Record<ActionId, string> = {
     'Make the reply natural, concise, and appropriate.',
     'Return only the reply text.',
   ].join('\n'),
-  translate:
-    'Translate the following content while preserving context and intent. If no target language is provided, translate it into English.',
+
+  translate: [
+    'Translate the provided selected text into the target language.',
+    'Preserve the original meaning, tone, intent, legal context, technical context, and colloquial expressions.',
+    'Do not explain the translation.',
+    'Return only the translated text.',
+  ].join('\n'),
+
+  form_fill: [
+    'You are filling a web form using the saved user profile or resume data.',
+    'Use only information available in the saved profile and form context.',
+    'Do not invent missing personal details.',
+    'Return JSON only.',
+    'The JSON format must be:',
+    '{"values":{"field_key":"value"}}',
+    'Use exact field_key values provided in the form context.',
+    'If a field cannot be answered from the profile, omit it.',
+  ].join('\n'),
+
   explain: 'Explain this content clearly with examples.',
   simplify: 'Simplify this content using plain language while preserving the key facts.',
   expand: 'Expand this content with helpful detail while preserving the original intent.',
@@ -90,9 +109,11 @@ export function buildMessages(input: {
     input.action === 'custom' && input.customPrompt
       ? input.customPrompt
       : input.action === 'translate'
-        ? `Translate the following content into ${
-            input.targetLanguage?.trim() || 'English'
-          } while preserving context and intent. Ignore ads, sponsored content, popups, cookie banners, navigation, footer, sidebars, comments, and promotional text.`
+        ? [
+            `Translate the following selected text into ${input.targetLanguage?.trim() || 'English'}.`,
+            'Preserve meaning, tone, legal context, technical context, and colloquial expressions.',
+            'Return only the translated text.',
+          ].join('\n')
         : ACTION_PROMPTS[input.action];
 
   const userParts = [

@@ -309,8 +309,9 @@ function showTargetLanguagePicker(): Promise<string | undefined> {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === 'GET_SELECTION') {
+  if (message.type === 'GET_SELECTION' || message.type === 'GET_ACTIVE_SELECTION') {
     sendResponse({
+      ok: true,
       text: currentSelectedText || window.getSelection()?.toString().trim() || '',
       updatedAt: Date.now(),
     });
@@ -322,18 +323,39 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
+  if (message.type === 'GET_FORM_CONTEXT') {
+    sendResponse(extractFormContext());
+    return false;
+  }
+
+  if (message.type === 'APPLY_FORM_FILL') {
+    const values =
+      message.values && typeof message.values === 'object'
+        ? (message.values as Record<string, string>)
+        : {};
+
+    sendResponse(applyFormFill(values));
+    return false;
+  }
+
   if (message.type === 'PROMPT_FOR_DETAIL') {
     currentSelectedText = message.text;
     void handleAction(message.action as ActionId);
+    return false;
   }
 
   if (message.type === 'AI_RESPONSE' || message.type === 'AI_ERROR') {
     hideLoadingIndicator();
+    return false;
   }
 
   if (message.type === 'REPLACE_SELECTION') {
     replaceSelection(message.text);
+    sendResponse({ ok: true });
+    return false;
   }
+
+  return false;
 });
 
 const BASE_SKIP_SELECTORS = [
@@ -559,4 +581,223 @@ function normalizeReadableText(text: string) {
 
 function isAdvertisementLine(line: string) {
   return AD_LINE_PATTERNS.some((pattern) => pattern.test(line));
+}
+
+interface FormFieldContext {
+  key: string;
+  label: string;
+  type: string;
+  name: string;
+  id: string;
+  placeholder: string;
+  value: string;
+  required: boolean;
+  index: number;
+}
+
+function extractFormContext() {
+  const fields: FormFieldContext[] = getFillableFields().map((element, index) => {
+    const label = getFieldLabel(element);
+    const type = getFieldType(element);
+    const name = element.getAttribute('name') || '';
+    const id = element.id || '';
+    const placeholder = element.getAttribute('placeholder') || '';
+
+    return {
+      key: getFieldKey(element, index),
+      label,
+      type,
+      name,
+      id,
+      placeholder,
+      value: getFieldValue(element),
+      required: element.hasAttribute('required'),
+      index,
+    };
+  });
+
+  return {
+    ok: fields.length > 0,
+    title: document.title || '',
+    url: window.location.href,
+    fields,
+    text: JSON.stringify(
+      {
+        pageTitle: document.title || '',
+        pageUrl: window.location.href,
+        fields,
+      },
+      null,
+      2
+    ),
+    error: fields.length > 0 ? undefined : 'No fillable form fields found on this page.',
+  };
+}
+
+function getFillableFields() {
+  return Array.from(
+    document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+      'input, textarea, select'
+    )
+  ).filter((element) => {
+    if (isHiddenElementForForm(element)) return false;
+
+    if (element instanceof HTMLInputElement) {
+      return ![
+        'hidden',
+        'submit',
+        'button',
+        'reset',
+        'image',
+        'file',
+        'password',
+      ].includes(element.type);
+    }
+
+    return true;
+  });
+}
+
+function getFieldKey(
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+  index: number
+) {
+  return (
+    element.getAttribute('name') ||
+    element.id ||
+    getFieldLabel(element) ||
+    element.getAttribute('placeholder') ||
+    `field_${index}`
+  );
+}
+
+function getFieldLabel(element: HTMLElement) {
+  if (element.id) {
+    const directLabel = Array.from(document.querySelectorAll<HTMLLabelElement>('label')).find(
+      (label) => label.htmlFor === element.id
+    );
+
+    if (directLabel?.innerText.trim()) {
+      return directLabel.innerText.trim();
+    }
+  }
+
+  const wrappingLabel = element.closest('label');
+
+  if (wrappingLabel?.innerText.trim()) {
+    return wrappingLabel.innerText.trim();
+  }
+
+  return (
+    element.getAttribute('aria-label') ||
+    element.getAttribute('placeholder') ||
+    element.getAttribute('name') ||
+    element.id ||
+    ''
+  ).trim();
+}
+
+function getFieldType(element: HTMLElement) {
+  if (element instanceof HTMLInputElement) return element.type || 'text';
+  if (element instanceof HTMLTextAreaElement) return 'textarea';
+  if (element instanceof HTMLSelectElement) return 'select';
+  return 'text';
+}
+
+function getFieldValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement) {
+  if (element instanceof HTMLInputElement && element.type === 'checkbox') {
+    return element.checked ? 'checked' : '';
+  }
+
+  return element.value || '';
+}
+
+
+
+function applyFormFill(values: Record<string, string>) {
+  const fields = getFillableFields();
+  let filled = 0;
+
+  fields.forEach((field, index) => {
+    const keys = [
+      getFieldKey(field, index),
+      field.getAttribute('name') || '',
+      field.id || '',
+      getFieldLabel(field),
+      field.getAttribute('placeholder') || '',
+    ]
+      .map(normalizeFieldKey)
+      .filter(Boolean);
+
+    const matchedEntry = Object.entries(values).find(([key]) =>
+      keys.includes(normalizeFieldKey(key))
+    );
+
+    if (!matchedEntry) return;
+
+    const value = String(matchedEntry[1] ?? '').trim();
+    if (!value) return;
+
+    setFieldValue(field, value);
+    filled += 1;
+  });
+
+  return {
+    ok: filled > 0,
+    filled,
+    error: filled > 0 ? undefined : 'No matching fields were filled.',
+  };
+}
+
+function setFieldValue(
+  field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+  value: string
+) {
+  field.focus();
+
+  if (field instanceof HTMLSelectElement) {
+    const normalizedValue = normalizeFieldKey(value);
+
+    const option = Array.from(field.options).find((item) =>
+      [item.value, item.textContent || ''].some(
+        (candidate) => normalizeFieldKey(candidate) === normalizedValue
+      )
+    );
+
+    if (option) {
+      field.value = option.value;
+    }
+
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    return;
+  }
+
+  if (field instanceof HTMLInputElement && field.type === 'checkbox') {
+    field.checked = ['yes', 'true', 'checked', '1'].includes(value.toLowerCase());
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    return;
+  }
+
+  field.value = value;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function normalizeFieldKey(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function isHiddenElementForForm(element: HTMLElement) {
+  if (element.hidden || element.getAttribute('aria-hidden') === 'true') {
+    return true;
+  }
+
+  const style = window.getComputedStyle(element);
+
+  return style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0';
 }

@@ -259,8 +259,22 @@ async function resetExtensionState() {
 }
 
 function createContextMenus() {
+  const contextMenuActions: ActionId[] = [
+    'summarize',
+    'rewrite',
+    'reply',
+    'translate',
+    'explain',
+    'simplify',
+    'expand',
+    'improve',
+    'grammar',
+    'custom',
+    'ask',
+  ];
+
   chrome.contextMenus.removeAll(() => {
-    (Object.keys(ACTION_LABELS) as ActionId[]).forEach((action) => {
+    contextMenuActions.forEach((action) => {
       chrome.contextMenus.create({
         id: action,
         title: ACTION_LABELS[action],

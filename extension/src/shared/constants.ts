@@ -21,6 +21,12 @@ export const TRANSLATE_LANGUAGES = [
   'Tamil',
   'Telugu',
   'Kannada',
+  'Arabic',
+  'French',
+  'Spanish',
+  'German',
+  'Chinese',
+  'Japanese',
 ] as const;
 
 export const DEFAULT_PROMPTS: CustomPrompt[] = [
@@ -47,4 +53,5 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   model: 'llama-3.3-70b-versatile',
   theme: 'system',
   prompts: DEFAULT_PROMPTS,
+  userProfile: '',
 };

@@ -20,6 +20,7 @@ import {
   HISTORY_KEY,
   SELECTED_TEXT_KEY,
   SETTINGS_KEY,
+  TRANSLATE_LANGUAGES,
 } from '../shared/constants';
 import { ACTION_LABELS } from '../shared/prompts';
 import {
@@ -248,6 +249,7 @@ function App() {
   const [clipboardInput, setClipboardInput] = useState('');
   const [clipboardSearch, setClipboardSearch] = useState('');
   const pendingAutoReplaceRef = useRef(false);
+  const pendingFormFillRef = useRef(false);
 
   useEffect(() => {
     void loadHistory();
@@ -321,10 +323,13 @@ if (changes[AI_STATE_KEY]) {
 
   function applyAiState(state?: AiState) {
     if (!state) return;
+
     if (state.type === 'AI_LOADING') {
       setLoading(state);
       setError(null);
+      return;
     }
+
     if (state.type === 'AI_RESPONSE') {
       setLoading(null);
       setError(null);
@@ -334,9 +339,18 @@ if (changes[AI_STATE_KEY]) {
         pendingAutoReplaceRef.current = false;
         void replaceSelection(state.result);
       }
+
+      if (pendingFormFillRef.current && state.action === 'form_fill') {
+        pendingFormFillRef.current = false;
+        void applySmartFormFillResult(state.result);
+      }
+
+      return;
     }
+
     if (state.type === 'AI_ERROR') {
       pendingAutoReplaceRef.current = false;
+      pendingFormFillRef.current = false;
       setLoading(null);
       setError(state.error);
     }
@@ -662,6 +676,92 @@ if (changes[AI_STATE_KEY]) {
     }
   }
 
+  async function translateSelectedText() {
+    const response = await chrome.runtime.sendMessage({ type: 'GET_ACTIVE_SELECTION' });
+    const selectedText = response?.text?.trim();
+
+    if (!selectedText) {
+      setError('Select text on the page before using In-context Translation.');
+      return;
+    }
+
+    const targetLanguage =
+      window.prompt(
+        `Translate to which language? Example: ${TRANSLATE_LANGUAGES.join(', ')}`,
+        'English'
+      ) || 'English';
+
+    await runActionWithText('translate', selectedText, {
+      targetLanguage,
+      question:
+        'Preserve meaning, tone, legal context, technical context, and colloquial expressions.',
+    });
+  }
+
+  async function smartFillCurrentForm() {
+    const profile = settings?.userProfile?.trim();
+
+    if (!profile) {
+      setError('Add your saved profile or resume data in Settings before using Smart Form Fill.');
+      setView('settings');
+      return;
+    }
+
+    const response = await chrome.runtime.sendMessage({ type: 'GET_FORM_CONTEXT' });
+
+    if (!response?.ok || !response.text) {
+      setError(response?.error || 'No fillable form found on this page.');
+      return;
+    }
+
+    pendingFormFillRef.current = true;
+
+    await runActionWithText('form_fill', response.text, {
+      question: [
+        'Saved user profile or resume data:',
+        profile,
+        '',
+        'Fill this form using only the saved profile.',
+        'Return JSON only in this format:',
+        '{"values":{"field_key":"value"}}',
+        'Use exact field_key values from the form context.',
+        'Omit fields that cannot be answered.',
+      ].join('\n'),
+    });
+  }
+
+  async function applySmartFormFillResult(result: string) {
+    try {
+      const cleaned = result
+        .replace(/^```json/i, '')
+        .replace(/^```/i, '')
+        .replace(/```$/i, '')
+        .trim();
+
+      const parsed = JSON.parse(cleaned) as
+        | { values?: Record<string, string> }
+        | Record<string, string>;
+
+      const values =
+        'values' in parsed && parsed.values && typeof parsed.values === 'object'
+          ? parsed.values
+          : (parsed as Record<string, string>);
+
+      const response = await chrome.runtime.sendMessage({
+        type: 'APPLY_FORM_FILL',
+        values,
+      });
+
+      if (response?.ok) {
+        setError(null);
+      } else {
+        setError(response?.error || 'Smart Form Fill could not fill matching fields.');
+      }
+    } catch {
+      setError('Smart Form Fill returned invalid JSON. Try again with a clearer saved profile.');
+    }
+  }
+
   return (
   <div className="ci-shell">
     <main className="ci-main">
@@ -777,6 +877,23 @@ if (changes[AI_STATE_KEY]) {
               >
                 <RefreshCw size={15} />
                 <span>Refresh</span>
+              </button>
+              <button
+                className="soft-button compact"
+                title="Translate selected text while preserving tone and context"
+                onClick={() => void translateSelectedText()}
+                disabled={!hasApiKey || isAiRunning}
+              >
+                Translate Selected
+              </button>
+
+              <button
+                className="soft-button compact"
+                title="Detect and fill forms using your saved profile"
+                onClick={() => void smartFillCurrentForm()}
+                disabled={!hasApiKey || isAiRunning}
+              >
+                Smart Form Fill
               </button>
             </div>
           </section>
@@ -975,6 +1092,16 @@ if (changes[AI_STATE_KEY]) {
               </select>
             </label>
           </div>
+
+          <label className="field">
+            Saved Profile / Resume Data
+            <textarea
+              rows={7}
+              value={settings.userProfile}
+              placeholder="Paste your profile or resume details here: name, email, phone, skills, education, work experience, address, LinkedIn, portfolio, etc."
+              onChange={(event) => updateSettings('userProfile', event.target.value)}
+            />
+          </label>
 
           <div className="settings-actions">
             <button
