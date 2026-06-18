@@ -44,18 +44,20 @@ const ACTION_PROMPTS: Record<ActionId, string> = {
   ].join('\n'),
 
   rewrite: [
-    'Rewrite the provided text clearly and professionally.',
+    'Rewrite the provided content according to the user rewrite instruction.',
+    'If the user gives a style, tone, length, or format instruction, follow it strictly.',
     'Preserve the original meaning.',
-    'Improve tone, grammar, clarity, and flow.',
-    'If the user provided a tone or style detail, follow it.',
+    'Improve clarity, grammar, tone, and flow.',
+    'If no specific instruction is provided, rewrite clearly and professionally.',
     'Return only the rewritten text.',
   ].join('\n'),
 
   reply: [
-    'Draft a context-aware reply based on the provided page, thread, message, or conversation content.',
-    'The reply should be natural, concise, and appropriate for the context.',
+    'Draft a context-aware reply according to the user reply instruction.',
+    'If the user gives a tone, goal, length, or direction, follow it strictly.',
+    'Use only the provided content as context.',
     'Do not invent details.',
-    'If the user provided a reply goal or tone, follow it.',
+    'Make the reply natural, concise, and appropriate.',
     'Return only the reply text.',
   ].join('\n'),
   translate:
@@ -95,8 +97,8 @@ export function buildMessages(input: {
 
   const userParts = [
     `Instruction:\n${instruction}`,
-    input.question ? `Question or detail:\n${input.question}` : '',
-    `Webpage content:\n${cleanInputText(input.text)}`,
+    input.question ? `User instruction - follow this carefully:\n${input.question}` : '',
+    `Content:\n${cleanInputText(input.text)}`,
   ].filter(Boolean);
 
   return [

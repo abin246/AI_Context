@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
   AlertCircle,
@@ -247,6 +247,7 @@ function App() {
   const [clipboardItems, setClipboardItems] = useState<ClipboardEntry[]>([]);
   const [clipboardInput, setClipboardInput] = useState('');
   const [clipboardSearch, setClipboardSearch] = useState('');
+  const pendingAutoReplaceRef = useRef(false);
 
   useEffect(() => {
     void loadHistory();
@@ -328,8 +329,14 @@ if (changes[AI_STATE_KEY]) {
       setLoading(null);
       setError(null);
       setView('workbench');
+
+      if (pendingAutoReplaceRef.current && state.action === 'rewrite') {
+        pendingAutoReplaceRef.current = false;
+        void replaceSelection(state.result);
+      }
     }
     if (state.type === 'AI_ERROR') {
+      pendingAutoReplaceRef.current = false;
       setLoading(null);
       setError(state.error);
     }
@@ -385,6 +392,26 @@ if (changes[AI_STATE_KEY]) {
       return;
     }
 
+    const response = await chrome.runtime.sendMessage({
+      type: 'PROCESS_AI_REQUEST',
+      action,
+      text,
+      question: extra?.question,
+      targetLanguage: extra?.targetLanguage,
+      customPrompt: extra?.customPrompt,
+    });
+
+    if (response?.ok === false) {
+      setLoading(null);
+      setError(response.error || 'Could not start the AI request.');
+    }
+  }
+
+  async function runActionWithText(
+    action: ActionId,
+    text: string,
+    extra?: { question?: string; targetLanguage?: string; customPrompt?: string }
+  ) {
     const response = await chrome.runtime.sendMessage({
       type: 'PROCESS_AI_REQUEST',
       action,
@@ -521,86 +548,119 @@ if (changes[AI_STATE_KEY]) {
   const response = await chrome.runtime.sendMessage({ type: 'GET_ACTIVE_SELECTION' });
   const selectedText = response?.text?.trim();
 
-  if (!selectedText) {
-    setError('Select text on the page before using Smart Rewrite.');
-    return;
-  }
+  const rewriteInstruction =
+      window.prompt(
+        'Rewrite instruction? Example: formal, shorter, simpler, persuasive, friendly, bullet points'
+      ) || undefined;
 
-  const tone =
-    window.prompt('Rewrite style? Example: formal, shorter, simple, persuasive') || undefined;
+    if (selectedText) {
+      pendingAutoReplaceRef.current = true;
 
-  await runAction('rewrite', {
-    question: tone ? `Rewrite style: ${tone}` : undefined,
-  });
-}
+      await runActionWithText('rewrite', selectedText, {
+        question: rewriteInstruction
+          ? `User rewrite instruction: ${rewriteInstruction}`
+          : 'Rewrite the selected text clearly and professionally.',
+      });
 
-async function draftReplyFromPage() {
-  const replyGoal =
-    window.prompt('Reply goal or tone? Example: polite decline, interested, short follow-up') ||
-    undefined;
-
-  await runAction('reply', {
-    question: replyGoal ? `Reply goal: ${replyGoal}` : undefined,
-  });
-}
-
-async function saveClipboardText(text?: string) {
-  const value = (text ?? clipboardInput).trim();
-
-  if (!value) {
-    setError('Clipboard text is empty.');
-    return;
-  }
-
-  const nextItems = await addClipboardItem({
-    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    text: value,
-    title: currentPageTitle,
-    sourceUrl: currentPageUrl,
-    createdAt: Date.now(),
-  });
-
-  setClipboardItems(nextItems);
-  setClipboardInput('');
-  setError(null);
-}
-
-async function readSystemClipboard() {
-  try {
-    const text = await navigator.clipboard.readText();
-
-    if (!text.trim()) {
-      setError('System clipboard is empty.');
       return;
     }
 
-    await saveClipboardText(text);
-  } catch {
-    setError('Clipboard permission was blocked. Paste text manually instead.');
+    pendingAutoReplaceRef.current = false;
+
+    await runAction('rewrite', {
+      question: rewriteInstruction
+        ? `User rewrite instruction: ${rewriteInstruction}. No text was selected, so rewrite the readable current page content.`
+        : 'No text was selected, so rewrite the readable current page content clearly and professionally.',
+    });
   }
-}
+  async function draftReplyFromPage() {
+    const response = await chrome.runtime.sendMessage({ type: 'GET_ACTIVE_SELECTION' });
+    const selectedText = response?.text?.trim();
 
-async function removeClipboardEntry(id: string) {
-  const nextItems = await deleteClipboardItem(id);
-  setClipboardItems(nextItems);
-}
+    const replyInstruction =
+      window.prompt(
+        'Reply instruction? Example: polite decline, interested, short follow-up, professional reply'
+      ) || undefined;
 
-async function clearClipboardManager() {
-  await clearClipboardItems();
-  setClipboardItems([]);
-}
+    if (selectedText) {
+      await runActionWithText('reply', selectedText, {
+        question: replyInstruction
+          ? `User reply instruction: ${replyInstruction}`
+          : 'Draft a suitable reply to the selected content.',
+      });
 
-async function summarizeClipboardEntry(item: ClipboardEntry) {
-  const response = await chrome.runtime.sendMessage({
-    type: 'PROCESS_AI_REQUEST',
-    action: 'summarize',
-    text: item.text,
-  });
+      return;
+    }
 
-  if (response?.ok === false) {
-    setError(response.error || 'Could not summarize clipboard item.');
+    await runAction('reply', {
+      question: replyInstruction
+        ? `User reply instruction: ${replyInstruction}. No text was selected, so draft a reply using the readable current page content.`
+        : 'No text was selected, so draft a suitable reply using the readable current page content.',
+    });
   }
-}
+
+  async function saveClipboardText(text?: string) {
+    const value = (text ?? clipboardInput).trim();
+
+    if (!value) {
+      setError('Clipboard text is empty.');
+      return;
+    }
+
+    const nextItems = await addClipboardItem({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      text: value,
+      title: currentPageTitle,
+      sourceUrl: currentPageUrl,
+      createdAt: Date.now(),
+    });
+
+    setClipboardItems(nextItems);
+    setClipboardInput('');
+    setError(null);
+  }
+
+  async function readSystemClipboard() {
+    try {
+      if (!navigator.clipboard?.readText) {
+        setError('Clipboard read is not available. Paste text manually and click Save Text.');
+        return;
+      }
+
+      const text = await navigator.clipboard.readText();
+
+      if (!text.trim()) {
+        setError('System clipboard is empty.');
+        return;
+      }
+
+      await saveClipboardText(text);
+    } catch (error) {
+      console.warn('Clipboard read failed:', error);
+      setError('Clipboard permission is blocked. Paste text into the box manually and click Save Text.');
+    }
+  }
+  async function removeClipboardEntry(id: string) {
+    const nextItems = await deleteClipboardItem(id);
+    setClipboardItems(nextItems);
+  }
+
+  async function clearClipboardManager() {
+    await clearClipboardItems();
+    setClipboardItems([]);
+  }
+
+  async function summarizeClipboardEntry(item: ClipboardEntry) {
+    const response = await chrome.runtime.sendMessage({
+      type: 'PROCESS_AI_REQUEST',
+      action: 'summarize',
+      text: item.text,
+    });
+
+    if (response?.ok === false) {
+      setError(response.error || 'Could not summarize clipboard item.');
+    }
+  }
 
   return (
   <div className="ci-shell">
@@ -685,6 +745,7 @@ async function summarizeClipboardEntry(item: ClipboardEntry) {
             <div className="current-page-actions">
               <button
                 className="summary-primary-button"
+                title="Summarize current page - Ctrl+Shift+S"
                 onClick={() => void summarizeCurrentWebsite()}
                 disabled={!hasApiKey || isAiRunning}
               >
@@ -693,6 +754,7 @@ async function summarizeClipboardEntry(item: ClipboardEntry) {
 
               <button
                 className="soft-button compact"
+                title="Rewrite selected text. If no text is selected, rewrite the current page."
                 onClick={() => void rewriteSelectedText()}
                 disabled={!hasApiKey || isAiRunning}
               >
@@ -701,6 +763,7 @@ async function summarizeClipboardEntry(item: ClipboardEntry) {
 
               <button
                 className="soft-button compact"
+                title="Draft a reply from selected text or current page content."
                 onClick={() => void draftReplyFromPage()}
                 disabled={!hasApiKey || isAiRunning}
               >
